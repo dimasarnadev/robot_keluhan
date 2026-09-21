@@ -365,14 +365,9 @@ async function handleCommand({
     sessionName = null
 }) {
 
-    console.log(chatId, text);
     if (!isCommandAllowed(chatId)) {
         return false;
     }
-
-    console.log(text);
-    console.log(text.trim());
-    console.log(!text.trim().startsWith('/'));
 
     if (!text.trim().startsWith('/')) {
         return false;
