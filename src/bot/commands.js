@@ -377,8 +377,6 @@ async function handleCommand({
         return false;
     }
 
-    
-
     const parts =
         text.split(/\s+/);
 
