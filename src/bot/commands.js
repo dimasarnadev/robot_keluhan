@@ -315,21 +315,14 @@ async function handleRefresh(chatId, sessionName) {
             sessionName
         );
 
-        const result =
-            await pollKeluhan();
-
-        const total =
-            result?.total ??
-            result?.count ??
-            0;
+        await pollKeluhan();
 
         await sendText(
             chatId,
             [
                 '✅ *REFRESH SELESAI*',
                 '',
-                `Data monitoring telah diperbarui.`,
-                `Keluhan diproses: ${total}`
+                `Data keluhan telah diperbarui.`,
             ].join('\n'),
             sessionName
         );
