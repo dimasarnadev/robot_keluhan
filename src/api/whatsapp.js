@@ -17,78 +17,75 @@ module.exports = ({
     router.post(
         '/webhook',
         async (req, res) => {
-            // WAHA harus mendapat response cepat
+
+            /*
+             * WAHA harus mendapatkan response
+             * secepat mungkin.
+             */
+
             res.status(200).json({
                 status: true
             });
 
+
             try {
 
-                const payload =
-                    req.body || {};
+                const event =
+                    req.body;
+
 
                 console.log(
-                    '[WAHA] Webhook:',
-                    payload.event
+                    '📥 WAHA EVENT:',
+                    event.event
                 );
 
-                // Kita hanya memproses event message
+
                 if (
-                    payload.event !== 'message'
+                    event.event !== 'message'
                 ) {
                     return;
                 }
 
-                const message =
-                    payload.payload;
 
-                if (!message) {
-                    return;
-                }
+                const payload =
+                    event.payload || {};
 
-                // Jangan proses pesan yang dikirim bot sendiri
-                if (
-                    message.fromMe === true
-                ) {
-                    return;
-                }
 
                 const chatId =
-                    message.from ||
-                    message.chatId;
+                    payload.from ||
+                    payload.chatId;
 
-                const body =
-                    message.body ||
-                    message.text?.body ||
+
+                const text =
+                    payload.body ||
                     '';
 
-                if (!chatId || !body) {
+
+                if (
+                    !chatId ||
+                    !text
+                ) {
                     return;
                 }
 
-                const bot =
-                    getActiveBot();
 
-                if (!bot) {
+                console.log(
+                    `💬 ${chatId}: ${text}`
+                );
 
-                    console.warn(
-                        '[WAHA] Bot belum terdaftar.'
-                    );
-
-                    return;
-                }
 
                 await handleCommand({
+                    db,
+                    session,
                     chatId,
-                    message: body,
-                    sessionName:
-                        bot.session_name
+                    text
                 });
+
 
             } catch (error) {
 
                 console.error(
-                    '[WAHA] Webhook processing error:',
+                    '❌ Webhook WAHA:',
                     error
                 );
             }
