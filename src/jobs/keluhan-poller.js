@@ -421,7 +421,12 @@ function shouldReminder(
 /**
  * Proses satu siklus monitoring
  */
-async function pollKeluhan() {
+async function pollKeluhan(options = {}) {
+
+    const {
+        notifyNew = true,
+        notifyReminder = true
+    } = options;
 
     if (running) {
 
@@ -599,9 +604,9 @@ async function pollKeluhan() {
 
                 try {
 
-                    await notifyNewKeluhan(
-                        keluhan
-                    );
+                    if (notifyNew) {
+                        await notifyNewKeluhan(keluhan);
+                    }
 
                 } catch (error) {
 
@@ -657,14 +662,16 @@ async function pollKeluhan() {
 
                 try {
 
-                    await notifyReminder(
-                        {
-                            ...keluhan,
+                    if (notifyReminder) {
+                        await notifyReminder(
+                            {
+                                ...keluhan,
 
-                            status:
-                                current.status_terakhir
-                        }
-                    );
+                                status:
+                                    current.status_terakhir
+                            }
+                        );
+                    }
 
                 } catch (error) {
 

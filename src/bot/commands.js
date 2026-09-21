@@ -1,222 +1,493 @@
-const {
-    sendText
-} = require('./whatsapp');
+const { db } = require('../config/database');
+const { sendText } = require('./whatsapp');
+const { pollKeluhan } = require('../jobs/keluhan-poller');
 
-const {
-    pollKeluhan
-} = require('../jobs/keluhan-poller');
+const FINAL_STATUSES = [
+    'Selesai',
+    'Batal'
+];
 
+function isOpenStatus(status) {
+    if (!status) {
+        return true;
+    }
+
+    return !FINAL_STATUSES.includes(
+        String(status).trim()
+    );
+}
+
+function isCommandAllowed(chatId) {
+
+    const row = db.prepare(`
+        SELECT
+            enabled,
+            command_enabled
+        FROM whatsapp_groups
+        WHERE chat_id = ?
+        LIMIT 1
+    `).get(chatId);
+
+    if (!row) {
+        return false;
+    }
+
+    return (
+        row.enabled === 1 &&
+        row.command_enabled === 1
+    );
+}
+
+function formatDate(value) {
+
+    if (!value) {
+        return '-';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return String(value);
+    }
+
+    return date.toLocaleString('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+
+// ============================================================
+// /HELP
+// ============================================================
+
+function helpMessage() {
+
+    return [
+        '🤖 *BOT MONITORING KELUHAN*',
+        '',
+        '*Command tersedia:*',
+        '',
+        '*/keluhan*',
+        'Menampilkan 20 keluhan terbaru yang masih open.',
+        '',
+        '*/detail <no_laporan>*',
+        'Menampilkan detail satu keluhan.',
+        '',
+        '*/refresh*',
+        'Mengambil data terbaru dari APKT.',
+        '',
+        '*/help*',
+        'Menampilkan bantuan command.'
+    ].join('\n');
+}
+
+
+// ============================================================
+// /KELUHAN
+// ============================================================
+
+function getOpenKeluhan() {
+
+    return db.prepare(`
+        SELECT
+            id,
+            no_laporan,
+            nama_pelapor,
+            id_pelanggan,
+            no_meter,
+            status,
+            status_terakhir,
+            status_changed_at,
+            first_seen_at,
+            last_seen_at,
+            raw_data
+        FROM keluhan_monitoring
+        WHERE status IS NULL
+           OR TRIM(status) NOT IN ('Selesai', 'Batal')
+        ORDER BY
+            COALESCE(
+                last_seen_at,
+                first_seen_at,
+                created_at
+            ) DESC
+        LIMIT 20
+    `).all();
+}
+
+
+function formatKeluhanList(rows) {
+
+    if (!rows.length) {
+
+        return [
+            '📋 *DAFTAR KELUHAN OPEN*',
+            '',
+            '✅ Tidak ada keluhan open saat ini.'
+        ].join('\n');
+    }
+
+    const lines = [
+        '📋 *DAFTAR KELUHAN OPEN*',
+        '',
+        `Menampilkan ${rows.length} keluhan terbaru.`,
+        ''
+    ];
+
+    rows.forEach((row, index) => {
+
+        let raw = {};
+
+        try {
+            raw = row.raw_data
+                ? JSON.parse(row.raw_data)
+                : {};
+        } catch {
+            raw = {};
+        }
+
+        const nama =
+            row.nama_pelapor ||
+            raw.nama_pelapor ||
+            raw.nama_pelanggan ||
+            '-';
+
+        const permasalahan =
+            raw.permasalahan || '-';
+
+        const status =
+            row.status ||
+            row.status_terakhir ||
+            '-';
+
+        lines.push(
+            `*${index + 1}. ${row.no_laporan}*`
+        );
+
+        lines.push(
+            `👤 ${nama}`
+        );
+
+        lines.push(
+            `⚡ ${permasalahan}`
+        );
+
+        lines.push(
+            `🔄 ${status}`
+        );
+
+        lines.push('');
+    });
+
+    lines.push(
+        'Gunakan */detail <no_laporan>* untuk melihat detail.'
+    );
+
+    return lines.join('\n');
+}
+
+
+// ============================================================
+// /DETAIL
+// ============================================================
+
+function getDetailKeluhan(noLaporan) {
+
+    return db.prepare(`
+        SELECT *
+        FROM keluhan_monitoring
+        WHERE no_laporan = ?
+        LIMIT 1
+    `).get(noLaporan);
+}
+
+
+function formatDetail(row) {
+
+    if (!row) {
+
+        return [
+            '❌ *KELUHAN TIDAK DITEMUKAN*',
+            '',
+            'No laporan tidak ditemukan di database monitoring.'
+        ].join('\n');
+    }
+
+    let raw = {};
+
+    try {
+        raw = row.raw_data
+            ? JSON.parse(row.raw_data)
+            : {};
+    } catch {
+        raw = {};
+    }
+
+    const namaPelanggan =
+        raw.nama_pelanggan ||
+        raw.pelanggan_no_meter?.nama ||
+        row.nama_pelapor ||
+        '-';
+
+    const noMeter =
+        raw.no_meter ||
+        raw.pelanggan_no_meter?.no_meter ||
+        row.no_meter ||
+        '-';
+
+    const idPelanggan =
+        raw.id_pelanggan ||
+        raw.pelanggan_no_meter?.id_pelanggan ||
+        row.id_pelanggan ||
+        '-';
+
+    const namaUlp =
+        raw.nama_ulp ||
+        raw.master_ulp?.nama ||
+        '-';
+
+    const namaUp3 =
+        raw.nama_up3 ||
+        raw.master_ulp?.master_up3?.nama ||
+        '-';
+
+    const permasalahan =
+        raw.permasalahan ||
+        '-';
+
+    const alamat =
+        raw.alamat_pelanggan ||
+        '-';
+
+    const waktuLapor =
+        raw.waktu_lapor ||
+        '-';
+
+    const status =
+        row.status ||
+        row.status_terakhir ||
+        '-';
+
+    return [
+        '📋 *DETAIL KELUHAN*',
+        '',
+        `*No Laporan:* ${row.no_laporan}`,
+        '',
+        `👤 *Pelanggan:* ${namaPelanggan}`,
+        `🆔 *ID Pelanggan:* ${idPelanggan}`,
+        `⚡ *No Meter:* ${noMeter}`,
+        '',
+        `🏢 *UP3:* ${namaUp3}`,
+        `📍 *ULP:* ${namaUlp}`,
+        '',
+        `📝 *Permasalahan:*`,
+        permasalahan,
+        '',
+        `📍 *Alamat:*`,
+        alamat,
+        '',
+        `🕐 *Waktu Lapor:*`,
+        formatDate(waktuLapor),
+        '',
+        `🔄 *Status:* ${status}`,
+        '',
+        `⏱️ *Status berubah:*`,
+        formatDate(row.status_changed_at)
+    ].join('\n');
+}
+
+
+// ============================================================
+// /REFRESH
+// ============================================================
+
+async function handleRefresh(chatId, sessionName) {
+
+    try {
+
+        await sendText(
+            chatId,
+            '🔄 *REFRESH DATA*\n\nSedang mengambil data keluhan terbaru dari APKT...',
+            sessionName
+        );
+
+        const result =
+            await pollKeluhan({
+                notifyNew: false,
+                notifyReminder: false
+            });
+
+        const total =
+            result?.total ??
+            result?.count ??
+            0;
+
+        await sendText(
+            chatId,
+            [
+                '✅ *REFRESH SELESAI*',
+                '',
+                `Data monitoring telah diperbarui.`,
+                `Keluhan diproses: ${total}`
+            ].join('\n'),
+            sessionName
+        );
+
+    } catch (error) {
+
+        console.error(
+            '[BOT] Refresh error:',
+            error
+        );
+
+        await sendText(
+            chatId,
+            [
+                '❌ *REFRESH GAGAL*',
+                '',
+                error.message ||
+                    'Data APKT tidak dapat diperbarui.'
+            ].join('\n'),
+            sessionName
+        );
+    }
+}
+
+
+// ============================================================
+// COMMAND HANDLER
+// ============================================================
 
 async function handleCommand({
-    db,
-    session,
     chatId,
-    text
+    message,
+    sessionName
 }) {
 
+    if (!isCommandAllowed(chatId)) {
+        return false;
+    }
+
+    const text =
+        String(message || '')
+            .trim();
+
+    if (!text.startsWith('/')) {
+        return false;
+    }
+
     const parts =
-        text
-            .trim()
-            .split(/\s+/);
+        text.split(/\s+/);
 
     const command =
-        parts[0].toLowerCase();
+        parts[0]
+            .toLowerCase();
 
+    switch (command) {
 
-    // ==============================
-    // HELP
-    // ==============================
-
-    if (command === '/help') {
-
-        await sendText(
-            chatId,
-            [
-                '🤖 *BOT MONITORING KELUHAN*',
-                '',
-                '/status',
-                'Ringkasan keluhan berjalan',
-                '',
-                '/keluhan',
-                'Daftar keluhan berjalan',
-                '',
-                '/detail <no_laporan>',
-                'Detail keluhan',
-                '',
-                '/refresh',
-                'Refresh data APKT',
-                '',
-                '/help',
-                'Daftar command'
-            ].join('\n')
-        );
-
-        return;
-    }
-
-
-    // ==============================
-    // STATUS
-    // ==============================
-
-    if (
-        command === '/status' ||
-        command === '/keluhan'
-    ) {
-
-        const rows =
-            db.prepare(`
-                SELECT
-                    no_laporan,
-                    nama_pelapor,
-                    status,
-                    id_up3,
-                    id_ulp,
-                    status_changed_at
-                FROM keluhan_monitoring
-                ORDER BY status_changed_at DESC
-            `).all();
-
-
-        if (!rows.length) {
+        case '/help': {
 
             await sendText(
                 chatId,
-                '✅ Tidak ada keluhan yang sedang dimonitor.'
+                helpMessage(),
+                sessionName
             );
 
-            return;
+            return true;
         }
 
 
-        let message =
-            `📊 *MONITORING KELUHAN*\n\n` +
-            `Total: ${rows.length}\n\n`;
+        case '/keluhan': {
+
+            const rows =
+                getOpenKeluhan();
+
+            await sendText(
+                chatId,
+                formatKeluhanList(rows),
+                sessionName
+            );
+
+            return true;
+        }
 
 
-        rows.forEach(
-            (row, index) => {
+        case '/detail': {
 
-                message +=
-                    `${index + 1}. *${row.no_laporan}*\n` +
-                    `   👤 ${row.nama_pelapor || '-'}\n` +
-                    `   📍 ULP: ${row.id_ulp || '-'}\n` +
-                    `   📊 ${row.status || '-'}\n\n`;
+            const noLaporan =
+                parts[1];
+
+            if (!noLaporan) {
+
+                await sendText(
+                    chatId,
+                    [
+                        '❌ Format command salah.',
+                        '',
+                        'Gunakan:',
+                        '/detail <no_laporan>'
+                    ].join('\n'),
+                    sessionName
+                );
+
+                return true;
             }
-        );
 
-
-        await sendText(
-            chatId,
-            message
-        );
-
-        return;
-    }
-
-
-    // ==============================
-    // DETAIL
-    // ==============================
-
-    if (command === '/detail') {
-
-        const noLaporan =
-            parts[1];
-
-
-        if (!noLaporan) {
+            const row =
+                getDetailKeluhan(
+                    noLaporan
+                );
 
             await sendText(
                 chatId,
-                'Gunakan:\n/detail K1626090800017'
+                formatDetail(row),
+                sessionName
             );
 
-            return;
+            return true;
         }
 
 
-        const row =
-            db.prepare(`
-                SELECT *
-                FROM keluhan_monitoring
-                WHERE no_laporan = ?
-            `).get(noLaporan);
+        case '/refresh': {
+
+            await handleRefresh(
+                chatId,
+                sessionName
+            );
+
+            return true;
+        }
 
 
-        if (!row) {
+        default: {
 
             await sendText(
                 chatId,
-                `❌ ${noLaporan} tidak ditemukan.`
+                [
+                    '❓ Command tidak dikenal.',
+                    '',
+                    'Gunakan */help* untuk melihat command yang tersedia.'
+                ].join('\n'),
+                sessionName
             );
 
-            return;
+            return true;
         }
-
-
-        await sendText(
-            chatId,
-            [
-                '📋 *DETAIL KELUHAN*',
-                '',
-                `📌 No. Laporan : ${row.no_laporan}`,
-                `👤 Pelapor     : ${row.nama_pelapor || '-'}`,
-                `👥 Pelanggan   : ${row.id_pelanggan || '-'}`,
-                `⚡ No. Meter   : ${row.no_meter || '-'}`,
-                `📍 UP3         : ${row.id_up3 || '-'}`,
-                `📍 ULP         : ${row.id_ulp || '-'}`,
-                `📊 Status      : ${row.status || '-'}`,
-                `🕐 Status sejak: ${row.status_changed_at || '-'}`
-            ].join('\n')
-        );
-
-        return;
     }
-
-
-    // ==============================
-    // REFRESH
-    // ==============================
-
-    if (command === '/refresh') {
-
-        await sendText(
-            chatId,
-            '🔄 Mengambil data terbaru dari APKT...'
-        );
-
-
-        await pollKeluhan({
-            db,
-            session
-        });
-
-
-        await sendText(
-            chatId,
-            '✅ Refresh data APKT selesai.'
-        );
-
-        return;
-    }
-
-
-    // ==============================
-    // UNKNOWN COMMAND
-    // ==============================
-
-    await sendText(
-        chatId,
-        [
-            '❓ Command tidak dikenal.',
-            '',
-            'Gunakan /help untuk melihat daftar command.'
-        ].join('\n')
-    );
 }
 
 
 module.exports = {
-    handleCommand
+    handleCommand,
+    getOpenKeluhan,
+    getDetailKeluhan,
+    formatKeluhanList,
+    formatDetail,
+    helpMessage,
+    isOpenStatus,
+    isCommandAllowed
 };
