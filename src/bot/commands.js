@@ -365,6 +365,7 @@ async function handleCommand({
     sessionName = null
 }) {
 
+    console.log(chatId, text);
     if (!isCommandAllowed(chatId)) {
         return false;
     }
