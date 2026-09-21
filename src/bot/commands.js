@@ -369,9 +369,15 @@ async function handleCommand({
         return false;
     }
 
+    console.log(text);
+    console.log(text.trim());
+    console.log(!text.trim().startsWith('/'));
+
     if (!text.trim().startsWith('/')) {
         return false;
     }
+
+    
 
     const parts =
         text.split(/\s+/);
