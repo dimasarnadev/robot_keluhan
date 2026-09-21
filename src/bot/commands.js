@@ -361,19 +361,15 @@ async function handleRefresh(chatId, sessionName) {
 
 async function handleCommand({
     chatId,
-    message,
-    sessionName
+    text,
+    sessionName = null
 }) {
 
     if (!isCommandAllowed(chatId)) {
         return false;
     }
 
-    const text =
-        String(message || '')
-            .trim();
-
-    if (!text.startsWith('/')) {
+    if (!text.trim().startsWith('/')) {
         return false;
     }
 
