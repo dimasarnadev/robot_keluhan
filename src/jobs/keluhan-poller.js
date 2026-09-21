@@ -33,7 +33,7 @@ const REMINDER_INTERVAL =
 const POLL_LIMIT =
     Number(
         process.env.KELUHAN_POLL_LIMIT
-    ) || 100;
+    ) || 20;
 
 
 let running = false;

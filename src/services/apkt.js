@@ -145,7 +145,7 @@ async function getKeluhan({
     tanggalMulai,
     tanggalSelesai,
 
-    limit = 100,
+    limit = 20,
     skip = 0,
 
     filters = []
