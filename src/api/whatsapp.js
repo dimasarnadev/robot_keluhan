@@ -75,10 +75,8 @@ module.exports = ({
 
 
                 await handleCommand({
-                    db,
-                    session,
                     chatId,
-                    text
+                    text,
                 });
 
 

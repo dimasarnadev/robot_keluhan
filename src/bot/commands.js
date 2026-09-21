@@ -316,10 +316,7 @@ async function handleRefresh(chatId, sessionName) {
         );
 
         const result =
-            await pollKeluhan({
-                notifyNew: false,
-                notifyReminder: false
-            });
+            await pollKeluhan();
 
         const total =
             result?.total ??
