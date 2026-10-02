@@ -128,16 +128,15 @@ function formatKeluhanList(rows) {
 
     rows.forEach((row, index) => {
         const raw = parseRawData(row.raw_data);
-
-        const nama =
-            row.nama_pelapor || raw.nama_pelapor || raw.nama_pelanggan;
-
-        const status = row.status || row.status_terakhir;
+        const nama = row.nama_pelapor;
+        const status = row.status_terakhir;
 
         lines.push(`*${index + 1}. ${sanitizeText(row.no_laporan, 50)}*`);
-        lines.push(`👤 ${sanitizeText(nama, 100)}`);
-        lines.push(`⚡ ${sanitizeText(raw.permasalahan, 200)}`);
-        lines.push(`🔄 ${sanitizeText(status, 100)}`);
+        lines.push(`👤 *Pelapor:* ${sanitizeText(nama, 100)}`);
+        lines.push(`💬 *Permasalahan:* ${sanitizeText(raw.permasalahan, 200)}`);
+        lines.push(`🔄 *Status:* ${sanitizeText(status, 100)}`);
+        lines.push(`🕐 *Waktu Lapor:* ${formatDateTime(raw.waktu_lapor)}`);
+        lines.push(`⌛ *Durasi:* ${sanitizeText(raw.durasi, 50)}`);
         lines.push('');
     });
 
@@ -174,30 +173,21 @@ function formatDetail(row) {
 
     const raw = parseRawData(row.raw_data);
 
-    const namaPelanggan =
-        raw.nama_pelanggan ||
-        raw.pelanggan_no_meter?.nama ||
-        row.nama_pelapor;
+    const namaPelapor = row.nama_pelapor;
+    const namaPelanggan = raw.nama_pelanggan;
+    const noMeter = raw.no_meter || row.no_meter;
+    const idPelanggan = raw.id_pelanggan || row.id_pelanggan;
+    const namaUlp = raw.nama_ulp;
+    const namaUp3 = raw.nama_up3;
 
-    const noMeter =
-        raw.no_meter || raw.pelanggan_no_meter?.no_meter || row.no_meter;
-
-    const idPelanggan =
-        raw.id_pelanggan ||
-        raw.pelanggan_no_meter?.id_pelanggan ||
-        row.id_pelanggan;
-
-    const namaUlp = raw.nama_ulp || raw.master_ulp?.nama;
-    const namaUp3 = raw.nama_up3 || raw.master_ulp?.master_up3?.nama;
-
-    const status = row.status || row.status_terakhir;
+    const status = row.status_terakhir;
 
     return [
         '📋 *DETAIL KELUHAN*',
         '',
         `*No Laporan:* ${sanitizeText(row.no_laporan, 50)}`,
         '',
-        `👤 *Pelanggan:* ${sanitizeText(namaPelanggan, 100)}`,
+        `👤 *Pelapor:* ${sanitizeText(namaPelapor, 100)}`,
         `🆔 *ID Pelanggan:* ${sanitizeText(idPelanggan, 50)}`,
         `⚡ *No Meter:* ${sanitizeText(noMeter, 50)}`,
         '',
@@ -212,11 +202,8 @@ function formatDetail(row) {
         '',
         '🕐 *Waktu Lapor:*',
         formatDateTime(raw.waktu_lapor),
-        '',
         `🔄 *Status:* ${sanitizeText(status, 100)}`,
-        '',
-        '⏱️ *Status berubah:*',
-        formatDateTime(row.status_changed_at)
+        `⌛ *Durasi:* ${sanitizeText(raw.durasi, 50)}`,
     ].join('\n');
 }
 
