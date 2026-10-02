@@ -1,8 +1,8 @@
 const Database = require('better-sqlite3');
 
-const db = new Database(
-    process.env.DATABASE_PATH || './database.sqlite'
-);
+const env = require('./env');
+
+const db = new Database(env.databasePath);
 
 db.pragma('journal_mode = WAL');
 
@@ -88,6 +88,4 @@ db.exec(`
     );
 `);
 
-module.exports = {
-    db
-};
+module.exports = { db };

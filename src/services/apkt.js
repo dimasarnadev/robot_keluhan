@@ -1,15 +1,8 @@
 const axios = require('axios');
 
-const GRAPHQL_KELUHAN_URL =
-    process.env.GRAPHQL_KELUHAN_URL;
+const env = require('../config/env');
 
-const REQUEST_TIMEOUT =
-    Number(process.env.GRAPHQL_TIMEOUT_MS) || 15000;
-
-
-/*
- * Status resmi APKT
- */
+// Status resmi APKT
 const STATUS_APKT = [
     'Batal',
     'Konfirmasi',
@@ -21,16 +14,8 @@ const STATUS_APKT = [
     'Selesai'
 ];
 
-
-/*
- * Status yang dianggap selesai.
- * Reminder tidak dikirim lagi.
- */
-const FINAL_STATUSES = [
-    'Batal',
-    'Selesai'
-];
-
+// Status yang dianggap selesai. Reminder tidak dikirim lagi.
+const FINAL_STATUSES = ['Batal', 'Selesai'];
 
 const QUERY_KELUHAN = `
     query getMonitoringKeluhanAll(
@@ -56,6 +41,10 @@ const QUERY_KELUHAN = `
                 nama_pelapor
                 permasalahan
                 waktu_lapor
+                waktu_batal
+                waktu_selesai
+                waktu_nyala
+                durasi
                 status_akhir
                 alamat_pelanggan
 
@@ -77,201 +66,125 @@ const QUERY_KELUHAN = `
             }
         }
     }
-`;
+`
+    .replace(/\s+/g, ' ')
+    .trim();
 
-
-/**
- * Normalisasi data APKT
- */
+// Normalisasi data APKT (dipakai poller dan bot)
 function normalizeKeluhan(row) {
-
     return {
         id: row.id ?? null,
+        no_laporan: row.no_laporan ?? null,
+        nama_pelapor: row.nama_pelapor ?? null,
+        permasalahan: row.permasalahan ?? null,
+        waktu_lapor: row.waktu_lapor ?? null,
+        waktu_batal: row.waktu_batal ?? null,
+        waktu_selesai: row.waktu_selesai ?? null,
+        waktu_nyala: row.waktu_nyala ?? null,
+        durasi: row.durasi ?? null,
+        status: row.status_akhir ?? null,
+        status_akhir: row.status_akhir ?? null,
+        alamat_pelanggan: row.alamat_pelanggan ?? null,
 
-        no_laporan:
-            row.no_laporan ?? null,
+        no_meter: row.pelanggan_no_meter?.no_meter ?? null,
+        nama_pelanggan: row.pelanggan_no_meter?.nama ?? null,
+        id_pelanggan: row.pelanggan_no_meter?.id_pelanggan ?? null,
 
-        nama_pelapor:
-            row.nama_pelapor ?? null,
-
-        permasalahan:
-            row.permasalahan ?? null,
-
-        waktu_lapor:
-            row.waktu_lapor ?? null,
-
-        status:
-            row.status_akhir ?? null,
-
-        status_akhir:
-            row.status_akhir ?? null,
-
-        alamat_pelanggan:
-            row.alamat_pelanggan ?? null,
-
-        no_meter:
-            row.pelanggan_no_meter?.no_meter ?? null,
-
-        nama_pelanggan:
-            row.pelanggan_no_meter?.nama ?? null,
-
-        id_pelanggan:
-            row.pelanggan_no_meter?.id_pelanggan ?? null,
-
-        id_ulp:
-            row.master_ulp?.id ?? null,
-
-        nama_ulp:
-            row.master_ulp?.nama ?? null,
-
-        id_up3:
-            row.master_ulp?.master_up3?.id ?? null,
-
-        nama_up3:
-            row.master_ulp?.master_up3?.nama ?? null
+        id_ulp: row.master_ulp?.id ?? null,
+        nama_ulp: row.master_ulp?.nama ?? null,
+        id_up3: row.master_ulp?.master_up3?.id ?? null,
+        nama_up3: row.master_ulp?.master_up3?.nama ?? null
     };
 }
 
-
-/**
- * Ambil keluhan dari APKT
- */
-async function getKeluhan({
+// Request ke APKT. Mengembalikan data mentah (bentuk asli GraphQL).
+async function fetchKeluhanRaw({
     token,
     idUid,
     userId,
     idUlp,
-
     tanggalMulai,
     tanggalSelesai,
-
     limit = 20,
     skip = 0,
-
     filters = []
 }) {
-
-    if (!GRAPHQL_KELUHAN_URL) {
-        throw new Error(
-            'GRAPHQL_KELUHAN_URL belum dikonfigurasi.'
-        );
+    if (!env.graphqlKeluhanUrl) {
+        throw new Error('GRAPHQL_KELUHAN_URL belum dikonfigurasi.');
     }
 
     if (!token) {
-        throw new Error(
-            'Token APKT kosong.'
-        );
+        throw new Error('Token APKT kosong.');
     }
 
-    const response =
-        await axios.post(
-            GRAPHQL_KELUHAN_URL,
-
-            {
-                query:
-                    QUERY_KELUHAN,
-
-                variables: {
-
-                    search: {
-                        skip,
-                        take: limit,
-
-                        sort: null,
-
-                        requireTotalCount:
-                            true,
-
-                        dateFrom:
-                            tanggalMulai,
-
-                        dateTo:
-                            tanggalSelesai,
-
-                        isCreateDate:
-                            false,
-
-                        filter:
-                            filters
-                    },
-
-                    userId,
-                    idUid,
-                    idUlp
-                }
-            },
-
-            {
-                headers: {
-                    Authorization:
-                        `Bearer ${token}`,
-
-                    'Content-Type':
-                        'application/json'
+    const response = await axios.post(
+        env.graphqlKeluhanUrl,
+        {
+            query: QUERY_KELUHAN,
+            variables: {
+                search: {
+                    skip,
+                    take: limit,
+                    sort: null,
+                    requireTotalCount: true,
+                    dateFrom: tanggalMulai,
+                    dateTo: tanggalSelesai,
+                    isCreateDate: false,
+                    filter: filters
                 },
-
-                timeout:
-                    REQUEST_TIMEOUT
+                userId,
+                idUid,
+                idUlp
             }
-        );
+        },
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: env.requestTimeout
+        }
+    );
 
+    if (response.data?.errors && response.data.errors.length) {
+        const message = response.data.errors
+            .map((item) => item.message)
+            .join('; ');
 
-    if (
-        response.data?.errors &&
-        response.data.errors.length
-    ) {
+        const error = new Error(message);
 
-        const message =
-            response.data.errors
-                .map(item => item.message)
-                .join('; ');
-
-        const error =
-            new Error(message);
-
-        error.graphqlErrors =
-            response.data.errors;
+        error.graphqlErrors = response.data.errors;
 
         throw error;
     }
 
-
-    const result =
-        response.data
-            ?.data
-            ?.getMonitoringKeluhanAll;
-
+    const result = response.data?.data?.getMonitoringKeluhanAll;
 
     if (!result) {
-
-        throw new Error(
-            'Response APKT tidak memiliki data keluhan.'
-        );
+        throw new Error('Response APKT tidak memiliki data keluhan.');
     }
 
-
     return {
-
-        totalCount:
-            result.totalCount || 0,
-
-        totalPage:
-            result.totalPage || 0,
-
-        status:
-            result.status,
-
-        message:
-            result.message,
-
-        data:
-            (result.data || [])
-                .map(normalizeKeluhan)
+        totalCount: result.totalCount || 0,
+        totalPage: result.totalPage || 0,
+        status: result.status,
+        message: result.message,
+        data: result.data || []
     };
 }
 
+// Sama seperti fetchKeluhanRaw, dengan data yang sudah dinormalisasi.
+async function getKeluhan(params) {
+    const result = await fetchKeluhanRaw(params);
+
+    return {
+        ...result,
+        data: result.data.map(normalizeKeluhan)
+    };
+}
 
 module.exports = {
+    fetchKeluhanRaw,
     getKeluhan,
     normalizeKeluhan,
     STATUS_APKT,

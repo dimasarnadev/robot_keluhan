@@ -1,33 +1,33 @@
 name: Deploy Production
 
 on:
-  push:
-    branches:
-      - main
+    push:
+        branches:
+            - main
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
+    deploy:
+        runs-on: ubuntu-latest
 
-    steps:
-      - name: Deploy to Production (Windows)
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_KEY }}
-          script: |
-            cd /d C:\app\robot_keluhan
+        steps:
+            - name: Deploy to Production (Windows)
+              uses: appleboy/ssh-action@v1.2.0
+              with:
+                  host: ${{ secrets.PROD_HOST }}
+                  username: ${{ secrets.PROD_USER }}
+                  key: ${{ secrets.PROD_SSH_KEY }}
+                  script: |
+                      cd /d C:\app\robot_keluhan
 
-            echo === Update source ===
-            git fetch origin
-            git reset --hard origin/main
+                      echo === Update source ===
+                      git fetch origin
+                      git reset --hard origin/main
 
-            echo === Install dependencies ===
-            call npm ci --omit=dev
+                      echo === Install dependencies ===
+                      call npm ci --omit=dev
 
-            echo === Restart application ===
-            call pm2 restart robot-keluhan --update-env
+                      echo === Restart application ===
+                      call pm2 restart robot-keluhan --update-env
 
-            echo === Deployment completed ===
-            call pm2 status
+                      echo === Deployment completed ===
+                      call pm2 status

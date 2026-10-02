@@ -1,368 +1,133 @@
 const axios = require('axios');
 
-const { db } =
-    require('../config/database');
+const env = require('../config/env');
 
-
-const WAHA_URL =
-    process.env.WAHA_URL ||
-    'http://localhost:3000';
-
-const WAHA_API_KEY =
-    process.env.WAHA_API_KEY || '';
-
-
-const client =
-    axios.create({
-        baseURL: WAHA_URL,
-
-        timeout: 30000,
-
-        headers: {
-            'Content-Type':
-                'application/json',
-
-            ...(WAHA_API_KEY
-                ? {
-                    'X-Api-Key':
-                        WAHA_API_KEY
-                }
-                : {})
-        }
-    });
-
-
-function getActiveBot() {
-
-    return db
-        .prepare(`
-            SELECT *
-            FROM whatsapp_bot
-            WHERE enabled = 1
-            ORDER BY id
-            LIMIT 1
-        `)
-        .get();
-}
-
+const client = axios.create({
+    baseURL: env.waha.url,
+    timeout: 30000,
+    headers: {
+        'Content-Type': 'application/json',
+        ...(env.waha.apiKey ? { 'X-Api-Key': env.waha.apiKey } : {})
+    }
+});
 
 /**
- * Ambil session WAHA aktif
+ * PENTING: file ini tidak pernah menebak atau menghitung sendiri nama
+ * session WAHA. Semua fungsi di bawah menerima `sessionName` sebagai
+ * parameter wajib. Yang menentukan nilainya adalah `bot/waha-session.js`
+ * (lihat resolveSessionName), dipanggil sekali di titik masuk
+ * (webhook atau job internal), bukan di sini.
  */
-function getSessionName(
-    sessionName = null
-) {
 
-    const bot =
-        getActiveBot();
-
-    return (
-        sessionName ||
-        bot?.session_name ||
-        process.env.WAHA_SESSION ||
-        'default'
-    );
-}
-
-
-/**
- * Delay
- */
 function sleep(ms) {
-
-    return new Promise(
-        resolve => setTimeout(
-            resolve,
-            ms
-        )
-    );
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-
-const TYPING_DELAY_MIN_MS =
-    Number(
-        process.env.TYPING_DELAY_MIN_MS
-    ) || 3000;
-
-const TYPING_DELAY_MAX_MS =
-    Number(
-        process.env.TYPING_DELAY_MAX_MS
-    ) || 20000;
-
-const TYPING_DELAY_CHARS_PER_SECOND =
-    Number(
-        process.env.TYPING_DELAY_CHARS_PER_SECOND
-    ) || 6;
-
-
 /**
- * Menghitung durasi typing berdasarkan
- * panjang pesan dan kecepatan mengetik.
+ * Menghitung durasi typing berdasarkan panjang pesan dan kecepatan mengetik.
  *
- * Rumus:
- *
- * jumlah karakter
- * ---------------- × 1000
- * karakter/detik
- *
- * Hasil kemudian dibatasi antara
- * TYPING_DELAY_MIN_MS dan
- * TYPING_DELAY_MAX_MS.
+ * Rumus: (jumlah karakter / karakter per detik) x 1000,
+ * dibatasi antara typing.minMs dan typing.maxMs.
+ * Ditambah randomisasi kecil (+-10%) agar durasi tidak selalu sama.
  */
 function calculateTypingDelay(text) {
-
-    const characterCount =
-        String(text || '').length;
-
+    const characterCount = String(text || '').length;
 
     const calculatedDelay =
-        (
-            characterCount /
-            TYPING_DELAY_CHARS_PER_SECOND
-        ) * 1000;
+        (characterCount / env.typing.charsPerSecond) * 1000;
 
-
-    const delay =
-        Math.max(
-            TYPING_DELAY_MIN_MS,
-            Math.min(
-                calculatedDelay,
-                TYPING_DELAY_MAX_MS
-            )
-        );
-
-
-    /*
-     * Randomisasi kecil agar tidak selalu
-     * memiliki durasi yang persis sama.
-     *
-     * ±10%
-     */
-    const randomFactor =
-        0.9 +
-        Math.random() * 0.2;
-
-
-    return Math.round(
-        delay * randomFactor
+    const delay = Math.max(
+        env.typing.minMs,
+        Math.min(calculatedDelay, env.typing.maxMs)
     );
+
+    const randomFactor = 0.9 + Math.random() * 0.2;
+
+    return Math.round(delay * randomFactor);
 }
 
-
-/**
- * START TYPING
- */
-async function startTyping(
-    chatId,
-    sessionName = null
-) {
-
-    const session =
-        getSessionName(
-            sessionName
-        );
-
-
-    return client.post(
-        '/api/startTyping',
-        {
-            session,
-            chatId
-        }
-    );
+async function startTyping(chatId, sessionName) {
+    return client.post('/api/startTyping', { session: sessionName, chatId });
 }
 
-
-/**
- * STOP TYPING
- */
-async function stopTyping(
-    chatId,
-    sessionName = null
-) {
-
-    const session =
-        getSessionName(
-            sessionName
-        );
-
-
-    return client.post(
-        '/api/stopTyping',
-        {
-            session,
-            chatId
-        }
-    );
+async function stopTyping(chatId, sessionName) {
+    return client.post('/api/stopTyping', { session: sessionName, chatId });
 }
 
-
 /**
- * SEND TEXT DENGAN PROSES:
+ * Kirim teks dengan alur:
+ * START TYPING -> DELAY -> STOP TYPING -> SEND TEXT
  *
- * START TYPING
- *      ↓
- * RANDOM DELAY
- *      ↓
- * STOP TYPING
- *      ↓
- * SEND TEXT
+ * @param {string} chatId
+ * @param {string} text
+ * @param {string} sessionName - wajib diisi, hasil dari resolveSessionName().
  */
-async function sendText(
-    chatId,
-    text,
-    sessionName = null
-) {
-
+async function sendText(chatId, text, sessionName) {
     if (!chatId) {
-        throw new Error(
-            'chatId WhatsApp kosong.'
-        );
+        throw new Error('chatId WhatsApp kosong.');
     }
-
 
     if (!text) {
+        throw new Error('Pesan WhatsApp kosong.');
+    }
+
+    if (!sessionName) {
         throw new Error(
-            'Pesan WhatsApp kosong.'
+            'sessionName wajib diisi. Panggil resolveSessionName() ' +
+                'sebelum memanggil sendText().'
         );
     }
 
+    const typingDelay = calculateTypingDelay(text);
 
-    const session =
-        getSessionName(
-            sessionName
-        );
+    console.log(`⌨️ WAHA typing → ${chatId} (${typingDelay} ms)`);
 
-
-    const typingDelay =
-        calculateTypingDelay(
-            text
-        );
-
-
-    console.log(
-        `⌨️ WAHA typing → ${chatId} (${typingDelay} ms)`
-    );
-
-
-    /*
-     * 1. START TYPING
-     */
-    await startTyping(
-        chatId,
-        session
-    );
-
+    await startTyping(chatId, sessionName);
 
     try {
-
-        /*
-         * 2. RANDOM DELAY
-         */
-        await sleep(
-            typingDelay
-        );
-
+        await sleep(typingDelay);
     } finally {
-
-        /*
-         * 3. STOP TYPING
-         *
-         * Tetap dilakukan walaupun
-         * terjadi error pada delay.
-         */
+        // Tetap dilakukan walaupun terjadi error pada delay.
         try {
-
-            await stopTyping(
-                chatId,
-                session
-
-            );
-
+            await stopTyping(chatId, sessionName);
         } catch (error) {
-
-            console.error(
-                '⚠️ Gagal stop typing:',
-                error.message
-            );
+            console.error('⚠️ Gagal stop typing:', error.message);
         }
     }
 
+    console.log(`📤 WAHA sendText → ${chatId}`);
 
-    /*
-     * 4. SEND TEXT
-     */
-    console.log(
-        `📤 WAHA sendText → ${chatId}`
+    const response = await client.post('/api/sendText', {
+        session: sessionName,
+        chatId,
+        text
+    });
+
+    return response.data;
+}
+
+// Ambil informasi akun WAHA untuk satu session tertentu.
+async function getMe(sessionName) {
+    const response = await client.get(
+        `/api/${encodeURIComponent(sessionName)}/me`
     );
 
-
-    const response =
-        await client.post(
-            '/api/sendText',
-            {
-                session,
-                chatId,
-                text
-            }
-        );
-
-
     return response.data;
 }
 
-
-/**
- * Ambil informasi akun WAHA
- */
-async function getMe(
-    sessionName = null
-) {
-
-    const session =
-        getSessionName(
-            sessionName
-        );
-
-
-    const response =
-        await client.get(
-            `/api/${encodeURIComponent(session)}/me`
-        );
-
+// Ambil daftar grup WhatsApp untuk satu session tertentu.
+async function getGroups(sessionName) {
+    const response = await client.get(
+        `/api/${encodeURIComponent(sessionName)}/groups`
+    );
 
     return response.data;
 }
-
-
-/**
- * Ambil daftar grup WhatsApp
- */
-async function getGroups(
-    sessionName = null
-) {
-
-    const session =
-        getSessionName(
-            sessionName
-        );
-
-
-    const response =
-        await client.get(
-            `/api/${encodeURIComponent(session)}/groups`
-        );
-
-
-    return response.data;
-}
-
 
 module.exports = {
     sendText,
     startTyping,
     stopTyping,
     getMe,
-    getGroups,
-    getActiveBot
+    getGroups
 };

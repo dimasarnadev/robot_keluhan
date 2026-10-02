@@ -1,182 +1,107 @@
-const {
-    sendText
-} = require('./whatsapp');
+const { db } = require('../config/database');
+const { formatDateTime, sanitizeText } = require('../utils/format');
+const { resolveSessionName } = require('./waha-session');
+const { sendText } = require('./whatsapp');
 
-const {
-    db
-} = require('../config/database');
-
-
-function formatDate(value) {
-
-    if (!value) {
-        return '-';
-    }
-
-    const date =
-        new Date(value);
-
-    if (
-        Number.isNaN(
-            date.getTime()
-        )
-    ) {
-        return value;
-    }
-
-    return date.toLocaleString(
-        'id-ID',
-        {
-            timeZone:
-                'Asia/Jakarta',
-
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-
-            hour: '2-digit',
-            minute: '2-digit'
-        }
-    );
-}
-
-
-/**
- * Format keluhan baru
- */
-function formatNewKeluhan(
-    keluhan
-) {
-
+// Format keluhan baru
+function formatNewKeluhan(keluhan) {
     return [
         '🚨 KELUHAN BARU',
         '',
-        `No Laporan : ${keluhan.no_laporan || '-'}`,
-        `Pelanggan  : ${keluhan.nama_pelanggan || '-'}`,
-        `No Meter   : ${keluhan.no_meter || '-'}`,
-        `ULP        : ${keluhan.nama_ulp || '-'}`,
+        `No Laporan : ${sanitizeText(keluhan.no_laporan, 50)}`,
+        `Pelanggan  : ${sanitizeText(keluhan.nama_pelapor, 100)}`,
+        `No Meter   : ${sanitizeText(keluhan.no_meter, 50)}`,
+        `ULP        : ${sanitizeText(keluhan.nama_ulp, 100)}`,
         '',
         'Permasalahan:',
-        keluhan.permasalahan || '-',
+        sanitizeText(keluhan.permasalahan, 500),
         '',
-        `Status     : ${keluhan.status || '-'}`,
-        `Waktu Lapor: ${formatDate(keluhan.waktu_lapor)}`,
+        `Status     : ${sanitizeText(keluhan.status, 100)}`,
+        `Waktu Lapor: ${formatDateTime(keluhan.waktu_lapor)}`,
         '',
         'Mohon segera ditindaklanjuti.'
     ].join('\n');
 }
 
-
-/**
- * Format reminder
- */
-function formatReminder(
-    keluhan
-) {
-
+// Format reminder
+function formatReminder(keluhan) {
     return [
         '⚠️ REMINDER KELUHAN',
         '',
-        `No Laporan : ${keluhan.no_laporan || '-'}`,
-        `Pelanggan  : ${keluhan.nama_pelanggan || '-'}`,
-        `ULP        : ${keluhan.nama_ulp || '-'}`,
+        `No Laporan : ${sanitizeText(keluhan.no_laporan, 50)}`,
+        `Pelanggan  : ${sanitizeText(keluhan.nama_pelapor, 100)}`,
+        `ULP        : ${sanitizeText(keluhan.nama_ulp, 100)}`,
+        'Permasalahan:',
+        sanitizeText(keluhan.permasalahan, 500),
         '',
-        `Status     : ${keluhan.status || '-'}`,
-        '',
-        '⏱ Status belum berubah selama 15 menit.',
+        `Status     : ${sanitizeText(keluhan.status, 100)}`,
+        `Durasi     : ${sanitizeText(keluhan.durasi, 50)}`,
         '',
         'Mohon segera ditindaklanjuti.'
     ].join('\n');
 }
 
-
-/**
- * Ambil grup untuk notifikasi keluhan baru
- */
+// Ambil grup untuk notifikasi keluhan baru
 function getNewNotificationGroups() {
-
     return db
-        .prepare(`
+        .prepare(
+            `
             SELECT *
             FROM whatsapp_groups
             WHERE enabled = 1
               AND notify_new = 1
             ORDER BY id
-        `)
+        `
+        )
         .all();
 }
 
-
-/**
- * Ambil grup untuk reminder
- */
+// Ambil grup untuk reminder
 function getReminderGroups() {
-
     return db
-        .prepare(`
+        .prepare(
+            `
             SELECT *
             FROM whatsapp_groups
             WHERE enabled = 1
               AND notify_reminder = 1
             ORDER BY id
-        `)
+        `
+        )
         .all();
 }
 
-
-/**
- * Kirim keluhan baru ke semua grup
- */
-async function notifyNewKeluhan(
-    keluhan
-) {
-
-    const groups =
-        getNewNotificationGroups();
+// Kirim keluhan baru ke semua grup
+async function notifyNewKeluhan(keluhan) {
+    const groups = getNewNotificationGroups();
 
     if (!groups.length) {
-
-        console.log(
-            'ℹ️ Tidak ada grup untuk notifikasi keluhan baru.'
-        );
+        console.log('ℹ️ Tidak ada grup untuk notifikasi keluhan baru.');
 
         return;
     }
 
-
-    const text =
-        formatNewKeluhan(
-            keluhan
-        );
-
+    // Di-resolve sekali di sini, bukan ditebak ulang oleh sendText per grup.
+    const sessionName = resolveSessionName();
+    const text = formatNewKeluhan(keluhan);
 
     for (const group of groups) {
-
         try {
+            await sendText(group.chat_id, text, sessionName);
 
-            await sendText(
-                group.chat_id,
-                text
-            );
-
-
-            db.prepare(`
+            db.prepare(
+                `
                 UPDATE keluhan_monitoring
                 SET last_notified_new_at = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE no_laporan = ?
-            `).run(
-                new Date().toISOString(),
-                keluhan.no_laporan
-            );
-
+            `
+            ).run(new Date().toISOString(), keluhan.no_laporan);
 
             console.log(
                 `📤 Keluhan baru dikirim ke ${group.group_name || group.chat_id}`
             );
-
         } catch (error) {
-
             console.error(
                 `❌ Gagal kirim ke grup ${group.chat_id}:`,
                 error.message
@@ -185,44 +110,25 @@ async function notifyNewKeluhan(
     }
 }
 
-
-/**
- * Kirim reminder
- */
-async function notifyReminder(
-    keluhan
-) {
-
-    const groups =
-        getReminderGroups();
+// Kirim reminder
+async function notifyReminder(keluhan) {
+    const groups = getReminderGroups();
 
     if (!groups.length) {
         return;
     }
 
-
-    const text =
-        formatReminder(
-            keluhan
-        );
-
+    const sessionName = resolveSessionName();
+    const text = formatReminder(keluhan);
 
     for (const group of groups) {
-
         try {
-
-            await sendText(
-                group.chat_id,
-                text
-            );
-
+            await sendText(group.chat_id, text, sessionName);
 
             console.log(
                 `⏰ Reminder dikirim ke ${group.group_name || group.chat_id}`
             );
-
         } catch (error) {
-
             console.error(
                 `❌ Gagal kirim reminder ke ${group.chat_id}:`,
                 error.message
@@ -230,18 +136,15 @@ async function notifyReminder(
         }
     }
 
-
-    db.prepare(`
+    db.prepare(
+        `
         UPDATE keluhan_monitoring
         SET last_reminder_at = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE no_laporan = ?
-    `).run(
-        new Date().toISOString(),
-        keluhan.no_laporan
-    );
+    `
+    ).run(new Date().toISOString(), keluhan.no_laporan);
 }
-
 
 module.exports = {
     notifyNewKeluhan,

@@ -1,0 +1,16 @@
+{
+    "tabWidth": 4,
+    "singleQuote": true,
+    "semi": true,
+    "trailingComma": "none",
+    "printWidth": 80,
+    "endOfLine": "lf",
+    "overrides": [
+        {
+            "files": "frontend/**/*.{js,jsx,css,json}",
+            "options": {
+                "tabWidth": 2
+            }
+        }
+    ]
+}
