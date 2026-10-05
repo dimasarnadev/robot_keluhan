@@ -22,7 +22,7 @@ module.exports = {
     authBaseUrl: process.env.AUTH_BASE_URL || '',
     graphqlMasterUrl: process.env.GRAPHQL_MASTER_URL || '',
     graphqlKeluhanUrl: process.env.GRAPHQL_KELUHAN_URL || '',
-    requestTimeout: toPositiveInt(process.env.GRAPHQL_TIMEOUT_MS, 15000),
+    requestTimeout: toPositiveInt(process.env.GRAPHQL_TIMEOUT_MS, 30000),
 
     webhookSecret: process.env.WAHA_WEBHOOK_SECRET || '',
 
@@ -50,7 +50,19 @@ module.exports = {
             process.env.KELUHAN_REMINDER_INTERVAL_MS,
             900000
         ),
-        pollLimit: toPositiveInt(process.env.KELUHAN_POLL_LIMIT, 100),
-        rangeDays: toPositiveInt(process.env.KELUHAN_RANGE_DAYS, 7)
+        // Ukuran satu halaman saat polling (poller mengambil semua halaman).
+        pollLimit: Math.min(
+            toPositiveInt(process.env.KELUHAN_POLL_LIMIT, 100),
+            500
+        ),
+        rangeDays: toPositiveInt(process.env.KELUHAN_RANGE_DAYS, 7),
+        // Rentang pencarian untuk command /detail.
+        detailRangeDays: toPositiveInt(
+            process.env.KELUHAN_DETAIL_RANGE_DAYS,
+            90
+        ),
+        // Bila false, polling pertama pada database kosong hanya dijadikan
+        // baseline (tanpa notifikasi) agar tidak membanjiri grup.
+        notifyOnFirstRun: process.env.KELUHAN_NOTIFY_ON_FIRST_RUN === 'true'
     }
 };

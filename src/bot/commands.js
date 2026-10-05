@@ -1,12 +1,19 @@
+const env = require('../config/env');
 const { db } = require('../config/database');
 const { pollKeluhan } = require('../jobs/keluhan-poller');
 const { FINAL_STATUSES } = require('../services/apkt');
+const {
+    SessionUnavailableError,
+    fetchLiveKeluhan
+} = require('../services/keluhan-live');
 const { formatDateTime, sanitizeText } = require('../utils/format');
 const { resolveSessionName } = require('./waha-session');
 const { sendText } = require('./whatsapp');
 
 const NO_LAPORAN_PATTERN = /^[A-Za-z0-9]{5,30}$/;
 const REFRESH_COOLDOWN_MS = 30000;
+const LIST_LIMIT = 20;
+const HISTORY_LIMIT = 10;
 
 let lastRefreshAt = 0;
 
@@ -39,14 +46,22 @@ function isCommandAllowed(chatId) {
     return row.enabled === 1 && row.command_enabled === 1;
 }
 
-function parseRawData(value) {
-    try {
-        const parsed = value ? JSON.parse(value) : {};
-
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-        return {};
+function liveErrorMessage(error) {
+    if (error instanceof SessionUnavailableError) {
+        return [
+            '🔒 *SESSION APKT TIDAK AKTIF*',
+            '',
+            'Login ulang melalui dashboard agar data dapat diambil.'
+        ].join('\n');
     }
+
+    console.error('[BOT] Gagal mengambil data APKT:', error.message);
+
+    return [
+        '❌ *GAGAL MENGAMBIL DATA*',
+        '',
+        'Server APKT tidak dapat dihubungi. Coba lagi beberapa saat.'
+    ].join('\n');
 }
 
 // ============================================================
@@ -60,13 +75,13 @@ function helpMessage() {
         '*Command tersedia:*',
         '',
         '*/keluhan*',
-        'Menampilkan 20 keluhan terbaru yang masih open.',
+        `Menampilkan ${LIST_LIMIT} keluhan open (data langsung dari APKT).`,
         '',
         '*/detail <no_laporan>*',
-        'Menampilkan detail satu keluhan.',
+        'Menampilkan detail keluhan beserta histori status.',
         '',
         '*/refresh*',
-        'Mengambil data terbaru dari APKT.',
+        'Memeriksa APKT sekarang dan mengirim notifikasi bila ada.',
         '',
         '*/help*',
         'Menampilkan bantuan command.'
@@ -74,43 +89,21 @@ function helpMessage() {
 }
 
 // ============================================================
-// /KELUHAN
+// /KELUHAN  (live dari APKT)
 // ============================================================
 
-function getOpenKeluhan() {
-    const placeholders = FINAL_STATUSES.map(() => '?').join(', ');
+async function getOpenKeluhan() {
+    const result = await fetchLiveKeluhan();
+    const open = result.data.filter((row) => isOpenStatus(row.status));
 
-    return db
-        .prepare(
-            `
-            SELECT
-                id,
-                no_laporan,
-                nama_pelapor,
-                id_pelanggan,
-                no_meter,
-                status,
-                status_terakhir,
-                status_changed_at,
-                first_seen_at,
-                last_seen_at,
-                raw_data
-            FROM keluhan_monitoring
-            WHERE status IS NULL
-               OR TRIM(status) NOT IN (${placeholders})
-            ORDER BY
-                COALESCE(
-                    last_seen_at,
-                    first_seen_at,
-                    created_at
-                ) DESC
-            LIMIT 20
-        `
-        )
-        .all(...FINAL_STATUSES);
+    return {
+        rows: open.slice(0, LIST_LIMIT),
+        totalOpen: open.length,
+        truncated: result.truncated
+    };
 }
 
-function formatKeluhanList(rows) {
+function formatKeluhanList({ rows, totalOpen, truncated }) {
     if (!rows.length) {
         return [
             '📋 *DAFTAR KELUHAN OPEN*',
@@ -122,23 +115,26 @@ function formatKeluhanList(rows) {
     const lines = [
         '📋 *DAFTAR KELUHAN OPEN*',
         '',
-        `Menampilkan ${rows.length} keluhan terbaru.`,
+        `Menampilkan ${rows.length} dari ${totalOpen} keluhan open.`,
         ''
     ];
 
     rows.forEach((row, index) => {
-        const raw = parseRawData(row.raw_data);
-        const nama = row.nama_pelapor;
-        const status = row.status_terakhir;
-
         lines.push(`*${index + 1}. ${sanitizeText(row.no_laporan, 50)}*`);
-        lines.push(`👤 *Pelapor:* ${sanitizeText(nama, 100)}`);
-        lines.push(`💬 *Permasalahan:* ${sanitizeText(raw.permasalahan, 200)}`);
-        lines.push(`🔄 *Status:* ${sanitizeText(status, 100)}`);
-        lines.push(`🕐 *Waktu Lapor:* ${formatDateTime(raw.waktu_lapor)}`);
-        lines.push(`⌛ *Durasi:* ${sanitizeText(raw.durasi, 50)}`);
+        lines.push(`👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`);
+        lines.push(
+            `💬 *Permasalahan:* ${sanitizeText(row.permasalahan, 200)}`
+        );
+        lines.push(`🔄 *Status:* ${sanitizeText(row.status, 100)}`);
+        lines.push(`🕐 *Waktu Lapor:* ${formatDateTime(row.waktu_lapor)}`);
+        lines.push(`⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`);
         lines.push('');
     });
+
+    if (truncated) {
+        lines.push('⚠️ Sebagian data APKT tidak terbaca (melebihi batas).');
+        lines.push('');
+    }
 
     lines.push('Gunakan */detail <no_laporan>* untuk melihat detail.');
 
@@ -146,65 +142,80 @@ function formatKeluhanList(rows) {
 }
 
 // ============================================================
-// /DETAIL
+// /DETAIL  (live dari APKT + histori status dari database)
 // ============================================================
 
-function getDetailKeluhan(noLaporan) {
+async function getDetailKeluhan(noLaporan) {
+    const result = await fetchLiveKeluhan({
+        rangeDays: env.keluhan.detailRangeDays,
+        extraFilters: [{ field: 'no_laporan', value: [noLaporan] }]
+    });
+
+    return result.data.find((row) => row.no_laporan === noLaporan) || null;
+}
+
+function getStatusHistory(noLaporan) {
     return db
         .prepare(
             `
-            SELECT *
-            FROM keluhan_monitoring
-            WHERE no_laporan = ?
-            LIMIT 1
+            SELECT status_lama, status_baru, changed_at
+            FROM (
+                SELECT id, status_lama, status_baru, changed_at
+                FROM keluhan_status_history
+                WHERE no_laporan = ?
+                ORDER BY id DESC
+                LIMIT ${HISTORY_LIMIT}
+            )
+            ORDER BY id ASC
         `
         )
-        .get(noLaporan);
+        .all(noLaporan);
 }
 
-function formatDetail(row) {
+function formatDetail(row, history) {
     if (!row) {
         return [
             '❌ *KELUHAN TIDAK DITEMUKAN*',
             '',
-            'No laporan tidak ditemukan di database monitoring.'
+            `No laporan tidak ditemukan di APKT (rentang ${env.keluhan.detailRangeDays} hari terakhir).`
         ].join('\n');
     }
 
-    const raw = parseRawData(row.raw_data);
-
-    const namaPelapor = row.nama_pelapor;
-    const namaPelanggan = raw.nama_pelanggan;
-    const noMeter = raw.no_meter || row.no_meter;
-    const idPelanggan = raw.id_pelanggan || row.id_pelanggan;
-    const namaUlp = raw.nama_ulp;
-    const namaUp3 = raw.nama_up3;
-
-    const status = row.status_terakhir;
-
-    return [
+    const lines = [
         '📋 *DETAIL KELUHAN*',
         '',
         `*No Laporan:* ${sanitizeText(row.no_laporan, 50)}`,
         '',
-        `👤 *Pelapor:* ${sanitizeText(namaPelapor, 100)}`,
-        `🆔 *ID Pelanggan:* ${sanitizeText(idPelanggan, 50)}`,
-        `⚡ *No Meter:* ${sanitizeText(noMeter, 50)}`,
+        `👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`,
+        `🆔 *ID Pelanggan:* ${sanitizeText(row.id_pelanggan, 50)}`,
+        `⚡ *No Meter:* ${sanitizeText(row.no_meter, 50)}`,
         '',
-        `🏢 *UP3:* ${sanitizeText(namaUp3, 100)}`,
-        `📍 *ULP:* ${sanitizeText(namaUlp, 100)}`,
+        `🏢 *UP3:* ${sanitizeText(row.nama_up3, 100)}`,
+        `📍 *ULP:* ${sanitizeText(row.nama_ulp, 100)}`,
         '',
         '📝 *Permasalahan:*',
-        sanitizeText(raw.permasalahan, 500),
+        sanitizeText(row.permasalahan, 500),
         '',
         '📍 *Alamat:*',
-        sanitizeText(raw.alamat_pelanggan, 300),
+        sanitizeText(row.alamat_pelanggan, 300),
         '',
         '🕐 *Waktu Lapor:*',
-        formatDateTime(raw.waktu_lapor),
-        `🔄 *Status:* ${sanitizeText(status, 100)}`,
-        `⌛ *Durasi:* ${sanitizeText(raw.durasi, 50)}`,
-    ].join('\n');
+        formatDateTime(row.waktu_lapor),
+        `🔄 *Status:* ${sanitizeText(row.status, 100)}`,
+        `⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`
+    ];
+
+    if (history.length) {
+        lines.push('', '🕘 *Histori Status:*');
+
+        for (const item of history) {
+            lines.push(
+                `• ${formatDateTime(item.changed_at)} — ${sanitizeText(item.status_baru, 100)}`
+            );
+        }
+    }
+
+    return lines.join('\n');
 }
 
 // ============================================================
@@ -226,35 +237,40 @@ async function handleRefresh(chatId, sessionName) {
 
     lastRefreshAt = now;
 
-    try {
-        await sendText(
-            chatId,
-            '🔄 *REFRESH DATA*\n\nSedang mengambil data keluhan terbaru dari APKT...',
-            sessionName
-        );
+    await sendText(
+        chatId,
+        '🔄 *REFRESH DATA*\n\nSedang memeriksa data keluhan terbaru dari APKT...',
+        sessionName
+    );
 
-        await pollKeluhan();
+    const result = await pollKeluhan();
 
-        await sendText(
-            chatId,
-            ['✅ *REFRESH SELESAI*', '', 'Data keluhan telah diperbarui.'].join(
-                '\n'
-            ),
-            sessionName
-        );
-    } catch (error) {
-        console.error('[BOT] Refresh error:', error);
-
+    if (result.ok) {
         await sendText(
             chatId,
             [
-                '❌ *REFRESH GAGAL*',
+                '✅ *REFRESH SELESAI*',
                 '',
-                'Data APKT tidak dapat diperbarui.'
+                `${result.total} keluhan diperiksa.`,
+                `Notifikasi baru: ${result.newSent}, reminder: ${result.reminderSent}.`
             ].join('\n'),
             sessionName
         );
+
+        return;
     }
+
+    await sendText(
+        chatId,
+        result.skipped
+            ? `ℹ️ *REFRESH DILEWATI*\n\n${result.reason}`
+            : [
+                  '❌ *REFRESH GAGAL*',
+                  '',
+                  'Data APKT tidak dapat diperiksa.'
+              ].join('\n'),
+        sessionName
+    );
 }
 
 // ============================================================
@@ -296,11 +312,15 @@ async function handleCommand({ chatId, text, incomingSession = null }) {
         }
 
         case '/keluhan': {
-            await sendText(
-                chatId,
-                formatKeluhanList(getOpenKeluhan()),
-                sessionName
-            );
+            let message;
+
+            try {
+                message = formatKeluhanList(await getOpenKeluhan());
+            } catch (error) {
+                message = liveErrorMessage(error);
+            }
+
+            await sendText(chatId, message, sessionName);
 
             return true;
         }
@@ -323,11 +343,17 @@ async function handleCommand({ chatId, text, incomingSession = null }) {
                 return true;
             }
 
-            await sendText(
-                chatId,
-                formatDetail(getDetailKeluhan(noLaporan)),
-                sessionName
-            );
+            let message;
+
+            try {
+                const row = await getDetailKeluhan(noLaporan);
+
+                message = formatDetail(row, getStatusHistory(noLaporan));
+            } catch (error) {
+                message = liveErrorMessage(error);
+            }
+
+            await sendText(chatId, message, sessionName);
 
             return true;
         }
@@ -358,6 +384,7 @@ module.exports = {
     handleCommand,
     getOpenKeluhan,
     getDetailKeluhan,
+    getStatusHistory,
     formatKeluhanList,
     formatDetail,
     helpMessage,

@@ -1,16 +1,63 @@
 const env = require('../config/env');
 const { db } = require('../config/database');
-const { session, getSessionUser } = require('../config/session');
 const { notifyNewKeluhan, notifyReminder } = require('../bot/notifier');
-const { getKeluhan, FINAL_STATUSES } = require('../services/apkt');
-const { formatDateOnly } = require('../utils/format');
+const { FINAL_STATUSES } = require('../services/apkt');
+const {
+    SessionUnavailableError,
+    getActiveScope,
+    fetchLiveKeluhan
+} = require('../services/keluhan-live');
 
 const POLL_INTERVAL = env.keluhan.pollInterval;
 const REMINDER_INTERVAL = env.keluhan.reminderInterval;
-const POLL_LIMIT = env.keluhan.pollLimit;
 
 let running = false;
 let timer = null;
+
+// Data keluhan TIDAK disimpan. Yang disimpan hanya status terakhir,
+// penanda notifikasi, dan histori perubahan status.
+const stmt = {
+    find: db.prepare('SELECT * FROM keluhan_monitoring WHERE no_laporan = ?'),
+    count: db.prepare('SELECT COUNT(*) AS total FROM keluhan_monitoring'),
+    insert: db.prepare(`
+        INSERT INTO keluhan_monitoring (
+            no_laporan, status_terakhir, status_changed_at, first_seen_at,
+            last_seen_at, is_final, new_notified_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    touch: db.prepare(`
+        UPDATE keluhan_monitoring
+        SET last_seen_at = ?, updated_at = ?
+        WHERE no_laporan = ?
+    `),
+    changeStatus: db.prepare(`
+        UPDATE keluhan_monitoring
+        SET status_terakhir = ?,
+            status_changed_at = ?,
+            is_final = ?,
+            last_reminder_at = NULL,
+            last_seen_at = ?,
+            updated_at = ?
+        WHERE no_laporan = ?
+    `),
+    addHistory: db.prepare(`
+        INSERT INTO keluhan_status_history (
+            no_laporan, status_lama, status_baru, changed_at
+        )
+        VALUES (?, ?, ?, ?)
+    `),
+    markNewNotified: db.prepare(`
+        UPDATE keluhan_monitoring
+        SET new_notified_at = ?, updated_at = ?
+        WHERE no_laporan = ?
+    `),
+    markReminded: db.prepare(`
+        UPDATE keluhan_monitoring
+        SET last_reminder_at = ?, updated_at = ?
+        WHERE no_laporan = ?
+    `)
+};
 
 // Ambil konfigurasi monitoring
 function getMonitorConfig() {
@@ -72,228 +119,124 @@ function saveMonitorConfig(user) {
     ).run(user.idUid, user.userId, user.idUp3, user.idUlp, now);
 }
 
-// Simpan keluhan baru
-function insertKeluhan(keluhan, user, now) {
-    const tanggalMulai = keluhan.waktu_lapor;
-    const tanggalSelesai = keluhan.waktu_batal || keluhan.waktu_selesai;
-
-    db.prepare(
-        `
-        INSERT INTO keluhan_monitoring (
-            no_laporan,
-
-            id_uid,
-            user_id,
-            id_up3,
-            id_ulp,
-
-            tanggal_mulai,
-            tanggal_selesai,
-
-            nama_pelapor,
-            id_pelanggan,
-            no_meter,
-
-            status,
-            status_terakhir,
-
-            status_changed_at,
-
-            first_seen_at,
-            last_seen_at,
-
-            raw_data,
-
-            created_at,
-            updated_at
-        )
-        VALUES (
-            ?, ?, ?, ?, ?,
-            ?, ?,
-            ?, ?, ?,
-            ?, ?,
-            ?,
-            ?, ?,
-            ?,
-            ?, ?
-        )
-    `
-    ).run(
-        keluhan.no_laporan,
-
-        user.idUid,
-        user.userId,
-        user.idUp3,
-        user.idUlp,
-
-        tanggalMulai,
-        tanggalSelesai,
-
-        keluhan.nama_pelapor,
-        keluhan.id_pelanggan,
-        keluhan.no_meter,
-
-        keluhan.status,
-        keluhan.status,
-
-        now,
-
-        now,
-        now,
-
-        JSON.stringify(keluhan),
-
-        now,
-        now
-    );
+function isFinalStatus(status) {
+    return FINAL_STATUSES.includes(String(status ?? '').trim());
 }
 
-// Update keluhan yang sudah ada
-function updateExistingKeluhan(existing, keluhan, now) {
-    const oldStatus = existing.status_terakhir;
-    const newStatus = keluhan.status;
-    const tanggalMulai = keluhan.waktu_lapor || existing.tanggal_mulai;
-    const tanggalSelesai = keluhan.waktu_batal || keluhan.waktu_selesai || keluhan.waktu_nyala || existing.tanggal_selesai;
-
-    // Status berubah
-    if (oldStatus !== newStatus) {
-        db.prepare(
-            `
-            UPDATE keluhan_monitoring
-
-            SET status = ?,
-                status_terakhir = ?,
-
-                tanggal_mulai = ?,
-                tanggal_selesai = ?,
-
-                status_changed_at = ?,
-
-                last_seen_at = ?,
-                last_reminder_at = NULL,
-
-                raw_data = ?,
-
-                updated_at = ?
-
-            WHERE no_laporan = ?
-        `
-        ).run(
-            newStatus,
-            newStatus,
-            tanggalMulai,
-            tanggalSelesai,
-            now,
-            now,
-            JSON.stringify(keluhan),
-            now,
-            keluhan.no_laporan
-        );
-
-        console.log(
-            `🔄 Status berubah ${keluhan.no_laporan}: ${oldStatus} → ${newStatus}`
-        );
-
-        return { changed: true };
-    }
-
-    // Status tidak berubah
-    db.prepare(
-        `
-        UPDATE keluhan_monitoring
-
-        SET status = ?,
-            tanggal_mulai = ?,
-            tanggal_selesai = ?,
-            last_seen_at = ?,
-            raw_data = ?,
-            updated_at = ?
-
-        WHERE no_laporan = ?
-    `
-    ).run(
-        newStatus,
-        tanggalMulai,
-        tanggalSelesai,
-        now,
-        JSON.stringify(keluhan),
-        now,
-        keluhan.no_laporan
-    );
-
-    return { changed: false };
-}
-
-// Cek apakah sudah waktunya reminder
-function shouldReminder(row, now) {
-    // Batal / Selesai tidak perlu reminder.
-    if (FINAL_STATUSES.includes(row.status_terakhir)) {
+// Reminder: status tidak berubah >= interval, lalu diulang tiap interval.
+function shouldReminder(row, nowMs) {
+    if (row.is_final) {
         return false;
     }
 
-    if (!row.status_changed_at) {
+    if (nowMs - Date.parse(row.status_changed_at) < REMINDER_INTERVAL) {
         return false;
     }
 
-    const changedAt = new Date(row.status_changed_at).getTime();
-    const currentTime = new Date(now).getTime();
-
-    // Belum mencapai interval reminder
-    if (currentTime - changedAt < REMINDER_INTERVAL) {
-        return false;
-    }
-
-    // Belum pernah reminder
     if (!row.last_reminder_at) {
         return true;
     }
 
-    const lastReminder = new Date(row.last_reminder_at).getTime();
-
-    return currentTime - lastReminder >= REMINDER_INTERVAL;
+    return nowMs - Date.parse(row.last_reminder_at) >= REMINDER_INTERVAL;
 }
 
-function findKeluhan(noLaporan) {
-    return db
-        .prepare(
-            `
-            SELECT *
-            FROM keluhan_monitoring
-            WHERE no_laporan = ?
-        `
-        )
-        .get(noLaporan);
+// Sinkronisasi status ke database (satu transaksi).
+// Mengembalikan daftar notifikasi yang harus dikirim.
+const syncKeluhan = db.transaction((list, now, silent) => {
+    const nowMs = Date.parse(now);
+    const actions = [];
+
+    for (const keluhan of list) {
+        const noLaporan = keluhan.no_laporan;
+
+        if (!noLaporan) {
+            continue;
+        }
+
+        const status = String(keluhan.status ?? '').trim();
+        const final = isFinalStatus(status) ? 1 : 0;
+        const existing = stmt.find.get(noLaporan);
+
+        if (!existing) {
+            // Baseline / laporan selesai tidak perlu notifikasi "baru".
+            const notified = silent || final ? now : null;
+
+            stmt.insert.run(noLaporan, status, now, now, now, final, notified, now);
+            stmt.addHistory.run(noLaporan, null, status, now);
+
+            if (!notified) {
+                actions.push({ type: 'new', keluhan });
+            }
+
+            continue;
+        }
+
+        if (existing.status_terakhir !== status) {
+            stmt.changeStatus.run(status, now, final, now, now, noLaporan);
+            stmt.addHistory.run(noLaporan, existing.status_terakhir, status, now);
+
+            console.log(
+                `🔄 Status berubah ${noLaporan}: ${existing.status_terakhir} → ${status}`
+            );
+        } else {
+            stmt.touch.run(now, now, noLaporan);
+        }
+
+        const row = stmt.find.get(noLaporan);
+
+        if (!row.is_final && !row.new_notified_at) {
+            // Notifikasi keluhan baru sebelumnya belum terkirim: coba lagi.
+            actions.push({ type: 'new', keluhan });
+        } else if (shouldReminder(row, nowMs)) {
+            actions.push({ type: 'reminder', keluhan });
+        }
+    }
+
+    return actions;
+});
+
+async function deliver(actions) {
+    let newSent = 0;
+    let reminderSent = 0;
+
+    for (const { type, keluhan } of actions) {
+        try {
+            const isNew = type === 'new';
+            const sent = isNew
+                ? await notifyNewKeluhan(keluhan)
+                : await notifyReminder(keluhan);
+
+            if (sent > 0) {
+                const ts = new Date().toISOString();
+
+                if (isNew) {
+                    stmt.markNewNotified.run(ts, ts, keluhan.no_laporan);
+                    newSent += 1;
+                } else {
+                    stmt.markReminded.run(ts, ts, keluhan.no_laporan);
+                    reminderSent += 1;
+                }
+            }
+        } catch (error) {
+            console.error(`❌ Notifikasi ${type}:`, error.message);
+        }
+    }
+
+    return { newSent, reminderSent };
 }
 
-// Proses satu siklus monitoring
+// Satu siklus: ambil langsung dari APKT -> catat status -> kirim notifikasi.
 async function pollKeluhan() {
     if (running) {
         console.log('⏳ Poller masih berjalan, skip.');
 
-        return;
+        return { ok: false, skipped: true, reason: 'Polling masih berjalan.' };
     }
 
     running = true;
 
     try {
-        if (!session.authToken || session.statusToken !== 'Aktif') {
-            console.log('⚠️ Poller: session APKT belum aktif.');
-
-            return;
-        }
-
-        const user = getSessionUser();
-
-        if (
-            !user ||
-            ![user.idUid, user.userId, user.idUp3, user.idUlp].every(
-                Number.isInteger
-            )
-        ) {
-            console.log('⚠️ Poller: data user APKT belum lengkap.');
-
-            return;
-        }
+        const user = getActiveScope();
 
         // Sinkronisasi konfigurasi dengan user session APKT.
         saveMonitorConfig(user);
@@ -303,87 +246,49 @@ async function pollKeluhan() {
         if (!config || !config.enabled) {
             console.log('ℹ️ Monitoring WhatsApp dinonaktifkan.');
 
-            return;
+            return {
+                ok: false,
+                skipped: true,
+                reason: 'Monitoring dinonaktifkan.'
+            };
         }
 
-        const rangeDays =
-            Number(config.tanggal_range_hari) || env.keluhan.rangeDays;
-
-        const today = new Date();
-        const start = new Date();
-
-        start.setDate(start.getDate() - rangeDays);
-
-        const tanggalMulai = formatDateOnly(start);
-        const tanggalSelesai = formatDateOnly(today);
-
-        console.log(`🔎 Polling APKT ${tanggalMulai} s/d ${tanggalSelesai}`);
-
-        const result = await getKeluhan({
-            token: session.authToken,
-            idUid: user.idUid,
-            userId: user.userId,
-            idUlp: user.idUlp,
-            tanggalMulai,
-            tanggalSelesai,
-            limit: POLL_LIMIT,
-            skip: 0
-        });
+        const result = await fetchLiveKeluhan();
 
         console.log(`📊 APKT: ${result.data.length} keluhan diterima.`);
 
-        const now = new Date().toISOString();
-
-        for (const keluhan of result.data) {
-            if (!keluhan.no_laporan) {
-                continue;
-            }
-
-            const existing = findKeluhan(keluhan.no_laporan);
-
-            // =========================
-            // KELUHAN BARU
-            // =========================
-            if (!existing) {
-                insertKeluhan(keluhan, user, now);
-
-                console.log(`🆕 Keluhan baru: ${keluhan.no_laporan}`);
-
-                try {
-                    await notifyNewKeluhan(keluhan);
-                } catch (error) {
-                    console.error('❌ Notifikasi keluhan baru:', error.message);
-                }
-
-                continue;
-            }
-
-            // =========================
-            // KELUHAN LAMA
-            // =========================
-            updateExistingKeluhan(existing, keluhan, now);
-
-            // Ambil data terbaru
-            const current = findKeluhan(keluhan.no_laporan);
-
-            // =========================
-            // REMINDER
-            // =========================
-            if (shouldReminder(current, now)) {
-                try {
-                    await notifyReminder({
-                        ...keluhan,
-                        status: current.status_terakhir
-                    });
-                } catch (error) {
-                    console.error('❌ Notifikasi reminder:', error.message);
-                }
-            }
+        if (result.truncated) {
+            console.warn(
+                '⚠️ Data APKT melebihi batas halaman, sebagian tidak terbaca.'
+            );
         }
 
-        console.log('✅ Polling keluhan selesai.');
+        const now = new Date().toISOString();
+        const silent =
+            !env.keluhan.notifyOnFirstRun && stmt.count.get().total === 0;
+
+        if (silent && result.data.length) {
+            console.log('ℹ️ Polling pertama: dicatat sebagai baseline.');
+        }
+
+        const actions = syncKeluhan(result.data, now, silent);
+        const sent = await deliver(actions);
+
+        console.log(
+            `✅ Polling selesai. Baru: ${sent.newSent}, reminder: ${sent.reminderSent}.`
+        );
+
+        return { ok: true, total: result.data.length, ...sent };
     } catch (error) {
+        if (error instanceof SessionUnavailableError) {
+            console.log(`⚠️ Poller: ${error.message}`);
+
+            return { ok: false, skipped: true, reason: error.message };
+        }
+
         console.error('❌ Poller APKT:', error.message);
+
+        return { ok: false, reason: error.message };
     } finally {
         running = false;
     }

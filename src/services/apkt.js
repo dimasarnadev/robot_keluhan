@@ -17,6 +17,8 @@ const STATUS_APKT = [
 // Status yang dianggap selesai. Reminder tidak dikirim lagi.
 const FINAL_STATUSES = ['Batal', 'Selesai'];
 
+const MAX_PAGES = 50;
+
 const QUERY_KELUHAN = `
     query getMonitoringKeluhanAll(
         $search: SearchWithDateArrayInput,
@@ -183,8 +185,46 @@ async function getKeluhan(params) {
     };
 }
 
+// Mengambil SEMUA halaman (data ternormalisasi, tanpa duplikat).
+// `truncated` = true bila batas halaman tercapai sebelum semua data terbaca.
+async function fetchAllKeluhan({ pageSize = 100, ...params }) {
+    const rows = [];
+    const seen = new Set();
+
+    let skip = 0;
+    let totalCount = 0;
+
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+        const result = await getKeluhan({ ...params, limit: pageSize, skip });
+
+        totalCount = result.totalCount;
+
+        if (!result.data.length) {
+            break;
+        }
+
+        for (const row of result.data) {
+            const key = row.no_laporan ?? `id:${row.id}`;
+
+            if (!seen.has(key)) {
+                seen.add(key);
+                rows.push(row);
+            }
+        }
+
+        skip += result.data.length;
+
+        if (skip >= totalCount || result.data.length < pageSize) {
+            break;
+        }
+    }
+
+    return { totalCount, data: rows, truncated: skip < totalCount };
+}
+
 module.exports = {
     fetchKeluhanRaw,
+    fetchAllKeluhan,
     getKeluhan,
     normalizeKeluhan,
     STATUS_APKT,
