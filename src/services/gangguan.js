@@ -23,195 +23,195 @@ const MAX_PAGES = 10;
 
 const QUERY_GANGGUAN = `
     query getMonitoringGangguanAll(
-    $search: SearchWithDateArrayInput
-    $idUid: BigInteger
-    $idPosko: BigInteger
-    $userId: BigInteger
+        $search: SearchWithDateArrayInput
+        $idUid: BigInteger
+        $idPosko: BigInteger
+        $userId: BigInteger
     ) {
-    getMonitoringGangguanAll(
-        search: $search
-        idUid: $idUid
-        idPosko: $idPosko
-        userId: $userId
-    ) {
-        totalCount
-        totalPage
-        status
-        message
-        data {
-        rating
-        feedback_rating
-        durasi
-        alasan_nyala_sementara
-        alamat_pelanggan
-        alamat_pelapor
-        alasan
-        deskripsi
-        alasan_pembatalan
-        appuser {
-            username
-        }
-        created_date
-        email_pelapor
-        equipment {
-            id
-            nama
-        }
-        eskalasi
-        fax_pelapor
-        hp_pelapor
-        id
-        master_regu {
-            id
-            id_posko
-            nama
-        }
-        master_posko {
-            id
-            nama
-            master_ulp {
-            id
-            nama
-            master_up3 {
+        getMonitoringGangguanAll(
+            search: $search
+            idUid: $idUid
+            idPosko: $idPosko
+            userId: $userId
+        ) {
+            totalCount
+            totalPage
+            status
+            message
+            data {
+            rating
+            feedback_rating
+            durasi
+            alasan_nyala_sementara
+            alamat_pelanggan
+            alamat_pelapor
+            alasan
+            deskripsi
+            alasan_pembatalan
+            appuser {
+                username
+            }
+            created_date
+            email_pelapor
+            equipment {
                 id
                 nama
-                master_uid {
+            }
+            eskalasi
+            fax_pelapor
+            hp_pelapor
+            id
+            master_regu {
+                id
+                id_posko
+                nama
+            }
+            master_posko {
                 id
                 nama
+                master_ulp {
+                id
+                nama
+                master_up3 {
+                    id
+                    nama
+                    master_uid {
+                    id
+                    nama
+                    }
+                }
                 }
             }
+            pelanggan_no_meter {
+                id_pelanggan
+                no_meter
+                nama
+                telepon
+                alamat
+                kode_gardu
+                no_tiang
+                lokasi
             }
-        }
-        pelanggan_no_meter {
-            id_pelanggan
-            no_meter
-            nama
-            telepon
-            alamat
-            kode_gardu
-            no_tiang
+            jarak
+            jumlah_lapor
+            jumlah_pelanggan_termarking
+            keterangan
+            konfirmasi
             lokasi
-        }
-        jarak
-        jumlah_lapor
-        jumlah_pelanggan_termarking
-        keterangan
-        konfirmasi
-        lokasi
-        keterangan_lokasi
-        media
-        nama_pelapor
-        no_laporan
-        patokan
-        permasalahan
-        prioritas {
-            id
-            nama
-        }
-        status_akhir
-        sub_fasilitas {
-            id
-            nama
-        }
-        telepon_pelapor
-        tipe_permasalahan {
-            id
-            nama
-        }
-        tipe_gangguan
-        tipe_wo
-        unit
-        updated_by
-        updated_date
-        waktu_batal
-        waktu_konfirmasi
-        waktu_lapor
-        waktu_nyala
-        waktu_nyala_sementara
-        waktu_padam
-        waktu_pengerjaan
-        waktu_penugasan
-        waktu_perjalanan
-        waktu_selesai
-        sub_tipe_permasalahan {
-            id
-            nama
-        }
-        kelompok {
-            id
-            nama
-        }
-        penyebab_gangguan {
-            id
-            nama
-        }
-        fasilitas {
-            id
-            nama
-        }
-        kelompok_utama {
-            id
-            nama
-        }
-        dampak {
-            id
-            nama
-        }
-        grup_penyebab_gangguan {
-            id
-            nama
-        }
-        gangguan_transaksi {
-            regu {
-            nama
+            keterangan_lokasi
+            media
+            nama_pelapor
+            no_laporan
+            patokan
+            permasalahan
+            prioritas {
+                id
+                nama
             }
-            id
-            waktu
-            jenis
-            catatan_petugas
-            appuser {
-            username
+            status_akhir
+            sub_fasilitas {
+                id
+                nama
+            }
+            telepon_pelapor
+            tipe_permasalahan {
+                id
+                nama
+            }
+            tipe_gangguan
+            tipe_wo
+            unit
+            updated_by
+            updated_date
+            waktu_batal
+            waktu_konfirmasi
+            waktu_lapor
+            waktu_nyala
+            waktu_nyala_sementara
+            waktu_padam
+            waktu_pengerjaan
+            waktu_penugasan
+            waktu_perjalanan
+            waktu_selesai
+            sub_tipe_permasalahan {
+                id
+                nama
+            }
+            kelompok {
+                id
+                nama
+            }
+            penyebab_gangguan {
+                id
+                nama
+            }
+            fasilitas {
+                id
+                nama
+            }
+            kelompok_utama {
+                id
+                nama
+            }
+            dampak {
+                id
+                nama
+            }
+            grup_penyebab_gangguan {
+                id
+                nama
+            }
+            gangguan_transaksi {
+                regu {
+                nama
+                }
+                id
+                waktu
+                jenis
+                catatan_petugas
+                appuser {
+                username
+                }
+            }
+            master_kelurahan {
+                nama_kelurahan
+            }
+            tindakan {
+                id
+                nama
+            }
+            cuaca {
+                id
+                nama
+            }
+            fax
+            waktu_fax
+            nama_media
+            waktu_media
+            master_merk_meter {
+                merk_meter
+            }
+            tarif_daya {
+                daya
+                tarif
+            }
+            penyebab_sementara
+            tindakan_telah_dilakukan_nyala_sementara
+            usulan_tindakan_selanjutnya
+            tindakan_telah_dilakukan_nyala
+            penyebab_nyala
+            jumlah_pelanggan_padam
+            pelanggaran
+            master_feeder {
+                nama
+            }
+            komponen_yang_terganggu_feeder
+            tindakan_yang_dilakukan_feeder
+            no_tiket_crm
+            no_lapor_pln
+            no_kerja
             }
         }
-        master_kelurahan {
-            nama_kelurahan
-        }
-        tindakan {
-            id
-            nama
-        }
-        cuaca {
-            id
-            nama
-        }
-        fax
-        waktu_fax
-        nama_media
-        waktu_media
-        master_merk_meter {
-            merk_meter
-        }
-        tarif_daya {
-            daya
-            tarif
-        }
-        penyebab_sementara
-        tindakan_telah_dilakukan_nyala_sementara
-        usulan_tindakan_selanjutnya
-        tindakan_telah_dilakukan_nyala
-        penyebab_nyala
-        jumlah_pelanggan_padam
-        pelanggaran
-        master_feeder {
-            nama
-        }
-        komponen_yang_terganggu_feeder
-        tindakan_yang_dilakukan_feeder
-        no_tiket_crm
-        no_lapor_pln
-        no_kerja
-        }
-    }
     }`
     .replace(/\s+/g, ' ')
     .trim();

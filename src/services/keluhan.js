@@ -47,50 +47,106 @@ function normalizeKeluhan(row) {
 
 const QUERY_KELUHAN = `
     query getMonitoringKeluhanAll(
-        $search: SearchWithDateArrayInput,
-        $userId: BigInteger,
-        $idUid: BigInteger,
+        $search: SearchWithDateArrayInput
+        $userId: BigInteger
+        $idUid: BigInteger
         $idUlp: BigInteger
     ) {
-        getMonitoringKeluhanAll(
-            search: $search,
-            userId: $userId,
-            idUid: $idUid,
-            idUlp: $idUlp
-        ) {
+        getMonitoringKeluhanAll(search: $search, userId: $userId, idUid: $idUid, idUlp: $idUlp) {
             totalCount
             totalPage
             status
             message
-
             data {
+            appuser {
+                userId
+            }
+            keluhan_transaksi {
                 id
-                no_laporan
-                nama_pelapor
-                permasalahan
-                waktu_lapor
-                waktu_batal
-                waktu_selesai
-                waktu_nyala
-                durasi
-                status_akhir
-                alamat_pelanggan
-
-                pelanggan_no_meter {
-                    no_meter
-                    nama
-                    id_pelanggan
+                waktu
+                jenis
+                catatan_petugas
+                appuser {
+                username
                 }
-
-                master_ulp {
+            }
+            durasi
+            id
+            pelanggan_no_meter {
+                nama
+                no_meter
+                id_pelanggan
+                kode_gardu
+                no_tiang
+            }
+            master_ulp {
+                id
+                nama
+                master_up3 {
+                id
+                nama
+                master_uid {
                     id
                     nama
-
-                    master_up3 {
-                        id
-                        nama
-                    }
                 }
+                }
+            }
+            id_tipe_permasalahan
+            alamat_pelanggan
+            daya_tarif
+            nama_pelapor
+            telepon_pelapor
+            hp_pelapor
+            fax_pelapor
+            email_pelapor
+            alamat_pelapor
+            media
+            waktu_padam
+            konfirmasi
+            lokasi
+            no_laporan
+            keterangan
+            created_date
+            appuser {
+                username
+            }
+            updated_date
+            updated_by
+            status_akhir
+            tipe_wo
+            unit
+            eskalasi
+            permasalahan
+            waktu_lapor
+            master_regu {
+                nama
+            }
+            waktu_penugasan
+            waktu_perjalanan
+            waktu_pengerjaan
+            waktu_nyala_sementara
+            waktu_nyala
+            waktu_batal
+            waktu_selesai
+            issuetype {
+                issuetypename
+            }
+            subissuetype {
+                subissuetypename
+            }
+            alasan
+            deskripsi
+            patokan
+            jarak
+            no_lapor_pln
+            respon_pelanggan
+            uraian
+            pelaksana
+            summary
+            jumlah_lapor
+            keluhan_lapor_ulang {
+                keterangan
+            }
             }
         }
     }`
