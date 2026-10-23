@@ -1,6 +1,6 @@
 const Database = require('better-sqlite3');
 
-const db = new Database('../../data.db');
+const db = new Database('data.db');
 
 // Pragmas first — always
 db.pragma('journal_mode = WAL');
