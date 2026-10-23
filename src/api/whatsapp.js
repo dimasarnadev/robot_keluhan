@@ -1,13 +1,14 @@
+require('dotenv').config();
+
 const crypto = require('crypto');
 const express = require('express');
 
-const env = require('../config/env');
 const { handleCommand } = require('../bot/commands');
 const { sanitizeText } = require('../utils/format');
 
 const MAX_TEXT_LENGTH = 500;
 
-module.exports = () => {
+module.exports = ({ db, session }) => {
     const router = express.Router();
 
     router.post('/webhook', async (req, res) => {
@@ -27,9 +28,6 @@ module.exports = () => {
             const chatId = payload.from || payload.chatId;
             const text = payload.body;
 
-            // Nama session WAHA yang menerima pesan ini apa adanya. Resolusi
-            // menjadi session yang dipakai untuk membalas terjadi di dalam
-            // handleCommand -> resolveSessionName(), bukan di sini.
             const incomingSession =
                 typeof event.session === 'string' ? event.session : null;
 

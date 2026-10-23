@@ -1,72 +1,56 @@
-const env = require('../config/env');
+require('dotenv').config();
+
 const { db } = require('../config/database');
-const { pollKeluhan } = require('../jobs/keluhan-poller');
-const { FINAL_STATUSES } = require('../services/apkt');
+const { getSession } = require('../config/session');
 const {
-    SessionUnavailableError,
-    fetchLiveKeluhan
-} = require('../services/keluhan-live');
-const { formatDateTime, sanitizeText } = require('../utils/format');
-const { resolveSessionName } = require('./waha-session');
+    postKeluhan,
+    STATUS_KELUHAN,
+    CLOSE_STATUS_KELUHAN
+} = require('../services/keluhan');
+const {
+    postGangguan,
+    STATUS_GANGGUAN,
+    CLOSE_STATUS_GANGGUAN
+} = require('../services/gangguan');
+const {
+    resolveDefaultDateRange,
+    resolveSessionDefaults
+} = require('../services/common');
+const {
+    formatDateOnly,
+    formatDateTime,
+    sanitizeText
+} = require('../utils/format');
 const { sendText } = require('./whatsapp');
 
 const NO_LAPORAN_PATTERN = /^[A-Za-z0-9]{5,30}$/;
-const REFRESH_COOLDOWN_MS = 30000;
-const LIST_LIMIT = 20;
-const HISTORY_LIMIT = 10;
-
-let lastRefreshAt = 0;
-
-function isOpenStatus(status) {
-    if (!status) {
-        return true;
-    }
-
-    return !FINAL_STATUSES.includes(String(status).trim());
-}
+const LIST_LIMIT = process.env.POLL_LIMIT;
 
 function isCommandAllowed(chatId) {
     const row = db
         .prepare(
-            `
-            SELECT
-                enabled,
-                command_enabled
-            FROM whatsapp_groups
-            WHERE chat_id = ?
-            LIMIT 1
-        `
+            'SELECT * FROM whatsapp_groups WHERE enabled = 1 AND chat_id = ? LIMIT 1'
         )
         .get(chatId);
 
-    if (!row) {
-        return false;
-    }
-
-    return row.enabled === 1 && row.command_enabled === 1;
+    return !!row;
 }
 
-function liveErrorMessage(error) {
-    if (error instanceof SessionUnavailableError) {
-        return [
-            '🔒 *SESSION APKT TIDAK AKTIF*',
-            '',
-            'Login ulang melalui dashboard agar data dapat diambil.'
-        ].join('\n');
+function isKeluhanOpenStatus(status) {
+    if (!status) {
+        return true;
     }
 
-    console.error('[BOT] Gagal mengambil data APKT:', error.message);
-
-    return [
-        '❌ *GAGAL MENGAMBIL DATA*',
-        '',
-        'Server APKT tidak dapat dihubungi. Coba lagi beberapa saat.'
-    ].join('\n');
+    return !CLOSE_STATUS_KELUHAN.includes(String(status).trim());
 }
 
-// ============================================================
-// /HELP
-// ============================================================
+function isGangguanOpenStatus(status) {
+    if (!status) {
+        return true;
+    }
+
+    return !CLOSE_STATUS_GANGGUAN.includes(String(status).trim());
+}
 
 function helpMessage() {
     return [
@@ -75,31 +59,69 @@ function helpMessage() {
         '*Command tersedia:*',
         '',
         '*/keluhan*',
-        `Menampilkan ${LIST_LIMIT} keluhan open (data langsung dari APKT).`,
+        `Menampilkan ${LIST_LIMIT} keluhan berstatus open.`,
+        '',
+        '*/gangguan*',
+        `Menampilkan ${LIST_LIMIT} gangguan berstatus open.`,
         '',
         '*/detail <no_laporan>*',
-        'Menampilkan detail keluhan beserta histori status.',
-        '',
-        '*/refresh*',
-        'Memeriksa APKT sekarang dan mengirim notifikasi bila ada.',
+        'Menampilkan detail keluhan atau gangguan berdasarkan prefix nomor laporan (K/G).',
         '',
         '*/help*',
         'Menampilkan bantuan command.'
     ].join('\n');
 }
 
-// ============================================================
-// /KELUHAN  (live dari APKT)
-// ============================================================
+function formatTransactionHistory(items, { includeRegu = false } = {}) {
+    if (!Array.isArray(items) || !items.length) {
+        return [];
+    }
+
+    return items.map((item) => {
+        const waktu = String(item?.waktu || '').trim();
+        const jenis = String(item?.jenis || '').trim();
+        const username = String(item?.appuser?.username || '').trim();
+        const regu =
+            includeRegu && item?.regu ? String(item.regu.nama).trim() : '';
+
+        const parts = [];
+
+        if (waktu) parts.push(waktu);
+        if (jenis) parts.push(jenis);
+        if (regu) parts.push(regu);
+        if (username) parts.push(username);
+
+        return `• ${parts.join(' — ')}`;
+    });
+}
 
 async function getOpenKeluhan() {
-    const result = await fetchLiveKeluhan();
-    const open = result.data.filter((row) => isOpenStatus(row.status));
+    const sessionData = getSession(process.env.SESSION_ID);
+    const baseParams = resolveSessionDefaults(sessionData, {
+        token: sessionData?.authToken,
+        idUid: sessionData?.user?.idUid,
+        userId: sessionData?.user?.userId,
+        idUlp: sessionData?.user?.idUlp
+    });
+    const dates = resolveDefaultDateRange({
+        tanggalMulai: undefined,
+        tanggalSelesai: undefined,
+        rangeDays: Number(process.env.POLL_RANGE_DAYS || 1)
+    });
+
+    const result = await postKeluhan({
+        ...baseParams,
+        ...dates
+    });
+
+    const open = result.data.filter((row) =>
+        isKeluhanOpenStatus(row.status_akhir)
+    );
 
     return {
         rows: open.slice(0, LIST_LIMIT),
         totalOpen: open.length,
-        truncated: result.truncated
+        truncated: open.length > LIST_LIMIT
     };
 }
 
@@ -122,10 +144,8 @@ function formatKeluhanList({ rows, totalOpen, truncated }) {
     rows.forEach((row, index) => {
         lines.push(`*${index + 1}. ${sanitizeText(row.no_laporan, 50)}*`);
         lines.push(`👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`);
-        lines.push(
-            `💬 *Permasalahan:* ${sanitizeText(row.permasalahan, 200)}`
-        );
-        lines.push(`🔄 *Status:* ${sanitizeText(row.status, 100)}`);
+        lines.push(`💬 *Permasalahan:* ${sanitizeText(row.permasalahan, 200)}`);
+        lines.push(`🔄 *Status:* ${sanitizeText(row.status_akhir, 100)}`);
         lines.push(`🕐 *Waktu Lapor:* ${formatDateTime(row.waktu_lapor)}`);
         lines.push(`⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`);
         lines.push('');
@@ -141,43 +161,35 @@ function formatKeluhanList({ rows, totalOpen, truncated }) {
     return lines.join('\n');
 }
 
-// ============================================================
-// /DETAIL  (live dari APKT + histori status dari database)
-// ============================================================
-
 async function getDetailKeluhan(noLaporan) {
-    const result = await fetchLiveKeluhan({
-        rangeDays: env.keluhan.detailRangeDays,
-        extraFilters: [{ field: 'no_laporan', value: [noLaporan] }]
+    const sessionData = getSession(process.env.SESSION_ID);
+    const baseParams = resolveSessionDefaults(sessionData, {
+        token: sessionData?.authToken,
+        idUid: sessionData?.user?.idUid,
+        userId: sessionData?.user?.userId,
+        idUlp: sessionData?.user?.idUlp
+    });
+    const dates = resolveDefaultDateRange({
+        tanggalMulai: undefined,
+        tanggalSelesai: undefined,
+        rangeDays: Number(process.env.POLL_RANGE_DAYS || 1)
+    });
+
+    const result = await postKeluhan({
+        ...baseParams,
+        ...dates,
+        filters: [{ field: 'no_laporan', value: [noLaporan] }]
     });
 
     return result.data.find((row) => row.no_laporan === noLaporan) || null;
 }
 
-function getStatusHistory(noLaporan) {
-    return db
-        .prepare(
-            `
-            SELECT status_lama, status_baru, changed_at
-            FROM (
-                SELECT id, status_lama, status_baru, changed_at
-                FROM keluhan_status_history
-                WHERE no_laporan = ?
-                ORDER BY id DESC
-                LIMIT ${HISTORY_LIMIT}
-            )
-            ORDER BY id ASC
-        `
-        )
-        .all(noLaporan);
-}
-
-function formatDetail(row, history) {
+function formatDetail(row) {
     if (!row) {
         return [
             '❌ *KELUHAN TIDAK DITEMUKAN*',
             '',
-            `No laporan tidak ditemukan di APKT (rentang ${env.keluhan.detailRangeDays} hari terakhir).`
+            `No laporan tidak ditemukan di APKT (rentang ${process.env.POLL_RANGE_DAYS} hari terakhir).`
         ].join('\n');
     }
 
@@ -187,6 +199,7 @@ function formatDetail(row, history) {
         `*No Laporan:* ${sanitizeText(row.no_laporan, 50)}`,
         '',
         `👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`,
+        `📞 *Telepon:* ${sanitizeText(row.telepon_pelapor, 50)}`,
         `🆔 *ID Pelanggan:* ${sanitizeText(row.id_pelanggan, 50)}`,
         `⚡ *No Meter:* ${sanitizeText(row.no_meter, 50)}`,
         '',
@@ -201,81 +214,159 @@ function formatDetail(row, history) {
         '',
         '🕐 *Waktu Lapor:*',
         formatDateTime(row.waktu_lapor),
-        `🔄 *Status:* ${sanitizeText(row.status, 100)}`,
+        `🔄 *Status:* ${sanitizeText(row.status_akhir, 100)}`,
         `⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`
     ];
 
-    if (history.length) {
-        lines.push('', '🕘 *Histori Status:*');
+    const transaksi = formatTransactionHistory(row.keluhan_transaksi || []);
 
-        for (const item of history) {
-            lines.push(
-                `• ${formatDateTime(item.changed_at)} — ${sanitizeText(item.status_baru, 100)}`
-            );
-        }
+    if (transaksi.length) {
+        lines.push('', '🕘 *Histori Transaksi:*');
+        lines.push(...transaksi);
     }
 
     return lines.join('\n');
 }
 
-// ============================================================
-// /REFRESH
-// ============================================================
+async function getOpenGangguan() {
+    const sessionData = getSession(process.env.SESSION_ID);
+    const baseParams = resolveSessionDefaults(sessionData, {
+        token: sessionData?.authToken,
+        idUid: sessionData?.user?.idUid,
+        userId: sessionData?.user?.userId,
+        idUlp: sessionData?.user?.idUlp,
+        idPosko: sessionData?.user?.idPosko
+    });
 
-async function handleRefresh(chatId, sessionName) {
-    const now = Date.now();
+    const dates = resolveDefaultDateRange({
+        tanggalMulai: undefined,
+        tanggalSelesai: undefined,
+        rangeDays: Number(process.env.POLL_RANGE_DAYS || 1)
+    });
 
-    if (now - lastRefreshAt < REFRESH_COOLDOWN_MS) {
-        await sendText(
-            chatId,
-            '⏳ Refresh baru saja dijalankan. Coba lagi beberapa saat.',
-            sessionName
-        );
+    const result = await postGangguan({
+        ...baseParams,
+        ...dates
+    });
 
-        return;
-    }
-
-    lastRefreshAt = now;
-
-    await sendText(
-        chatId,
-        '🔄 *REFRESH DATA*\n\nSedang memeriksa data keluhan terbaru dari APKT...',
-        sessionName
+    const open = result.data.filter((row) =>
+        isGangguanOpenStatus(row.status_akhir)
     );
 
-    const result = await pollKeluhan();
-
-    if (result.ok) {
-        await sendText(
-            chatId,
-            [
-                '✅ *REFRESH SELESAI*',
-                '',
-                `${result.total} keluhan diperiksa.`,
-                `Notifikasi baru: ${result.newSent}, reminder: ${result.reminderSent}.`
-            ].join('\n'),
-            sessionName
-        );
-
-        return;
-    }
-
-    await sendText(
-        chatId,
-        result.skipped
-            ? `ℹ️ *REFRESH DILEWATI*\n\n${result.reason}`
-            : [
-                  '❌ *REFRESH GAGAL*',
-                  '',
-                  'Data APKT tidak dapat diperiksa.'
-              ].join('\n'),
-        sessionName
-    );
+    return {
+        rows: open.slice(0, LIST_LIMIT),
+        totalOpen: open.length,
+        truncated: open.length > LIST_LIMIT
+    };
 }
 
-// ============================================================
-// COMMAND HANDLER
-// ============================================================
+function formatGangguanList({ rows, totalOpen, truncated }) {
+    if (!rows.length) {
+        return [
+            '📋 *DAFTAR GANGGUAN OPEN*',
+            '',
+            '✅ Tidak ada gangguan open saat ini.'
+        ].join('\n');
+    }
+
+    const lines = [
+        '📋 *DAFTAR GANGGUAN OPEN*',
+        '',
+        `Menampilkan ${rows.length} dari ${totalOpen} gangguan open.`,
+        ''
+    ];
+
+    rows.forEach((row, index) => {
+        lines.push(`*${index + 1}. ${sanitizeText(row.no_laporan, 50)}*`);
+        lines.push(`👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`);
+        lines.push(
+            `💬 *Permasalahan:* ${sanitizeText(row.permasalahan ?? row.deskripsi, 200)}`
+        );
+        lines.push(`🔄 *Status:* ${sanitizeText(row.status_akhir, 100)}`);
+        lines.push(`🕐 *Waktu Lapor:* ${formatDateTime(row.waktu_lapor)}`);
+        lines.push(`📍 *Posko:* ${sanitizeText(row.nama_posko, 100)}`);
+        lines.push(`⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`);
+        lines.push('');
+    });
+
+    if (truncated) {
+        lines.push('⚠️ Sebagian data APKT tidak terbaca (melebihi batas).');
+        lines.push('');
+    }
+
+    lines.push('Gunakan */detail <no_laporan>* untuk melihat detail.');
+
+    return lines.join('\n');
+}
+
+async function getDetailGangguan(noLaporan) {
+    const sessionData = getSession(process.env.SESSION_ID);
+    const baseParams = resolveSessionDefaults(sessionData, {
+        token: sessionData?.authToken,
+        idUid: sessionData?.user?.idUid,
+        userId: sessionData?.user?.userId,
+        idUlp: sessionData?.user?.idUlp,
+        idPosko: sessionData?.user?.idPosko
+    });
+
+    const dates = resolveDefaultDateRange({
+        tanggalMulai: undefined,
+        tanggalSelesai: undefined,
+        rangeDays: Number(process.env.POLL_RANGE_DAYS || 1)
+    });
+
+    const result = await postGangguan({
+        ...baseParams,
+        ...dates,
+        filters: [{ field: 'no_laporan', value: [noLaporan] }]
+    });
+
+    return result.data.find((row) => row.no_laporan === noLaporan) || null;
+}
+
+function formatDetailGangguan(row) {
+    if (!row) {
+        return [
+            '❌ *GANGGUAN TIDAK DITEMUKAN*',
+            '',
+            `No laporan tidak ditemukan di APKT (rentang ${process.env.POLL_RANGE_DAYS} hari terakhir).`
+        ].join('\n');
+    }
+
+    const lines = [
+        '📋 *DETAIL GANGGUAN*',
+        '',
+        `*No Laporan:* ${sanitizeText(row.no_laporan, 50)}`,
+        '',
+        `👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`,
+        `📞 *Telepon:* ${sanitizeText(row.telepon_pelapor, 50)}`,
+        `📍 *Posko:* ${sanitizeText(row.nama_posko, 100)}`,
+        `🆔 *ID Pelanggan:* ${sanitizeText(row.id_pelanggan, 50)}`,
+        `⚡ *No Meter:* ${sanitizeText(row.no_meter, 50)}`,
+        '',
+        '📝 *Permasalahan:*',
+        sanitizeText(row.permasalahan, 500),
+        '',
+        '📍 *Alamat:*',
+        sanitizeText(row.alamat_pelanggan, 300),
+        '',
+        '🕐 *Waktu Lapor:*',
+        formatDateTime(row.waktu_lapor),
+        `🔄 *Status:* ${sanitizeText(row.status_akhir, 100)}`,
+        `⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`
+    ];
+
+    const transaksi = formatTransactionHistory(row.gangguan_transaksi || [], {
+        includeRegu: true
+    });
+
+    if (transaksi.length) {
+        lines.push('', '🕘 *Histori Transaksi:*');
+        lines.push(...transaksi);
+    }
+
+    return lines.join('\n');
+}
 
 /**
  * @param {object} input
@@ -292,6 +383,10 @@ async function handleCommand({ chatId, text, incomingSession = null }) {
         return false;
     }
 
+    if (incomingSession !== process.env.WAHA_SESSION) {
+        return false;
+    }
+
     const trimmed = String(text).trim();
 
     if (!trimmed.startsWith('/')) {
@@ -301,8 +396,7 @@ async function handleCommand({ chatId, text, incomingSession = null }) {
     const parts = trimmed.split(/\s+/);
     const command = parts[0].toLowerCase();
 
-    // Satu-satunya tempat sessionName ditentukan untuk seluruh command ini.
-    const sessionName = resolveSessionName(incomingSession);
+    const sessionName = incomingSession;
 
     switch (command) {
         case '/help': {
@@ -312,13 +406,15 @@ async function handleCommand({ chatId, text, incomingSession = null }) {
         }
 
         case '/keluhan': {
-            let message;
+            const message = formatKeluhanList(await getOpenKeluhan());
 
-            try {
-                message = formatKeluhanList(await getOpenKeluhan());
-            } catch (error) {
-                message = liveErrorMessage(error);
-            }
+            await sendText(chatId, message, sessionName);
+
+            return true;
+        }
+
+        case '/gangguan': {
+            const message = formatGangguanList(await getOpenGangguan());
 
             await sendText(chatId, message, sessionName);
 
@@ -343,23 +439,20 @@ async function handleCommand({ chatId, text, incomingSession = null }) {
                 return true;
             }
 
-            let message;
+            const prefix = String(noLaporan).slice(0, 1).toUpperCase();
 
-            try {
-                const row = await getDetailKeluhan(noLaporan);
+            let row = null;
+            let message = '';
 
-                message = formatDetail(row, getStatusHistory(noLaporan));
-            } catch (error) {
-                message = liveErrorMessage(error);
+            if (prefix === 'G') {
+                row = await getDetailGangguan(noLaporan);
+                message = formatDetailGangguan(row);
+            } else {
+                row = await getDetailKeluhan(noLaporan);
+                message = formatDetail(row);
             }
 
             await sendText(chatId, message, sessionName);
-
-            return true;
-        }
-
-        case '/refresh': {
-            await handleRefresh(chatId, sessionName);
 
             return true;
         }
@@ -384,10 +477,14 @@ module.exports = {
     handleCommand,
     getOpenKeluhan,
     getDetailKeluhan,
-    getStatusHistory,
+    getOpenGangguan,
+    getDetailGangguan,
     formatKeluhanList,
     formatDetail,
+    formatGangguanList,
+    formatDetailGangguan,
     helpMessage,
-    isOpenStatus,
+    isKeluhanOpenStatus,
+    isGangguanOpenStatus,
     isCommandAllowed
 };

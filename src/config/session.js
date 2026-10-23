@@ -1,27 +1,26 @@
 const { db } = require('./database');
 
 const session = {
+    sessionId: '',
     authToken: '',
-    user: null,
-    statusToken: 'Belum Login',
-    captchaId: ''
+    user: null
 };
 
-// Hanya field ini yang boleh disimpan sebagai profil dan dikirim ke client.
-// authToken sengaja tidak termasuk.
 const PUBLIC_USER_FIELDS = [
     'userId',
     'idUid',
     'idUp3',
     'idUlp',
+    'idPosko',
     'namaUid',
     'namaUp3',
     'namaUlp',
+    'namaPosko',
     'employeeName',
     'username'
 ];
 
-function toPublicUser(user) {
+function parseSession(user) {
     if (!user || typeof user !== 'object' || Array.isArray(user)) {
         return null;
     }
@@ -33,71 +32,46 @@ function toPublicUser(user) {
     );
 }
 
-function loadSessionFromDB() {
+function loadSession(sessionId) {
     const row = db
         .prepare(
             `
             SELECT *
-            FROM app_session
-            WHERE id = 1
+            FROM user_sessions
+            WHERE session_id = ?
+            LIMIT 1
         `
         )
-        .get();
+        .get(sessionId);
 
     if (!row) {
-        console.log('📂 [SQLite3] Tidak ada session tersimpan.');
-
+        console.log('📂 [SQLite3] Session tidak ditemukan.');
         return;
     }
 
-    session.authToken = row.authToken || '';
-    session.statusToken = row.statusToken || 'Belum Login';
-
-    try {
-        session.user = row.user_json
-            ? toPublicUser(JSON.parse(row.user_json))
-            : null;
-    } catch (error) {
-        console.error('❌ [SQLite3] user_json tidak valid:', error.message);
-
-        session.user = null;
-        session.authToken = '';
-        session.statusToken = 'Belum Login';
-    }
+    session.authToken = row.auth_token;
+    session.user = row.session_data
+        ? parseSession(JSON.parse(row.session_data))
+        : null;
 
     console.log(
-        `📂 [SQLite3] Session: ${session.statusToken} | User: ${
-            session.user?.employeeName || '-'
+        `📂 [SQLite3] Session: ${session.user?.username} | User: ${
+            session.user?.employeeName
         }`
     );
 }
 
-// Mengambil informasi user APKT yang tersimpan di session.
-function getSessionUser() {
-    const user = session.user;
+function loadAndReturnSession(sessionId) {
+    loadSession(sessionId);
+    return session;
+}
 
-    if (!user) {
-        return null;
-    }
-
-    return {
-        idUid: Number(user.idUid),
-        userId: Number(user.userId),
-        idUp3: Number(user.idUp3),
-        idUlp: Number(user.idUlp),
-
-        namaUid: user.namaUid || '',
-        namaUp3: user.namaUp3 || '',
-        namaUlp: user.namaUlp || '',
-
-        employeeName: user.employeeName || '',
-        username: user.username || ''
-    };
+function getSession(sessionId) {
+    return session;
 }
 
 module.exports = {
-    session,
-    loadSessionFromDB,
-    getSessionUser,
-    toPublicUser
+    parseSession,
+    loadAndReturnSession,
+    getSession
 };

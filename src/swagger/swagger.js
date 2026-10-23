@@ -1,8 +1,7 @@
+require('dotenv').config();
 const path = require('path');
 
 const swaggerJsdoc = require('swagger-jsdoc');
-
-const env = require('../config/env');
 
 const apiDirectory = path.resolve(__dirname, '../api');
 
@@ -18,7 +17,9 @@ const options = {
 
         servers: [
             {
-                url: env.publicBaseUrl,
+                url:
+                    process.env.PUBLIC_BASE_URL ||
+                    `http://localhost:${process.env.PORT || 3000}`,
                 description: 'Server'
             }
         ]

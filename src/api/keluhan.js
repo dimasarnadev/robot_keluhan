@@ -1,7 +1,7 @@
 const express = require('express');
 
 const { requireAuth, respondUpstreamError } = require('../middleware/auth');
-const { fetchKeluhanRaw } = require('../services/apkt');
+const { postKeluhan } = require('../services/keluhan');
 const {
     ValidationError,
     requireInteger,
@@ -82,7 +82,7 @@ module.exports = ({ db, session }) => {
         }
 
         try {
-            const result = await fetchKeluhanRaw({
+            const result = await postKeluhan({
                 token: session.authToken,
                 ...params
             });

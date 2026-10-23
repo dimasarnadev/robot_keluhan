@@ -1,10 +1,8 @@
 const TIMEZONE = 'Asia/Jakarta';
 
-// Karakter kontrol dan karakter pembalik arah teks (bidi override).
 const CONTROL_CHARS =
     /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u202A-\u202E\u2066-\u2069]/g;
 
-// Karakter markup WhatsApp: *tebal* _miring_ ~coret~ `kode`
 const WHATSAPP_MARKUP = /[*_~`]/g;
 
 function formatDateTime(value) {
@@ -28,7 +26,6 @@ function formatDateTime(value) {
     });
 }
 
-// Format YYYY-MM-DD
 function formatDateOnly(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -37,7 +34,6 @@ function formatDateOnly(date) {
     return `${year}-${month}-${day}`;
 }
 
-// Membersihkan teks dari sumber luar sebelum dikirim ke WhatsApp.
 function sanitizeText(value, maxLength = 500) {
     if (value === null || value === undefined) {
         return '-';

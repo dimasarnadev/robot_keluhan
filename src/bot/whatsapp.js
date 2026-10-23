@@ -1,49 +1,34 @@
+require('dotenv').config();
+
 const axios = require('axios');
 
-const env = require('../config/env');
-
 const client = axios.create({
-    baseURL: env.waha.url,
+    baseURL: process.env.WAHA_URL,
     timeout: 30000,
     headers: {
         'Content-Type': 'application/json',
-        ...(env.waha.apiKey ? { 'X-Api-Key': env.waha.apiKey } : {})
+        ...(process.env.WAHA_API_KEY
+            ? { 'X-Api-Key': process.env.WAHA_API_KEY }
+            : {})
     }
 });
-
-/**
- * PENTING: file ini tidak pernah menebak atau menghitung sendiri nama
- * session WAHA. Semua fungsi di bawah menerima `sessionName` sebagai
- * parameter wajib. Yang menentukan nilainya adalah `bot/waha-session.js`
- * (lihat resolveSessionName), dipanggil sekali di titik masuk
- * (webhook atau job internal), bukan di sini.
- */
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Menghitung durasi typing berdasarkan panjang pesan dan kecepatan mengetik.
- *
- * Rumus: (jumlah karakter / karakter per detik) x 1000,
- * dibatasi antara typing.minMs dan typing.maxMs.
- * Ditambah randomisasi kecil (+-10%) agar durasi tidak selalu sama.
- */
 function calculateTypingDelay(text) {
     const characterCount = String(text || '').length;
 
     const calculatedDelay =
-        (characterCount / env.typing.charsPerSecond) * 1000;
+        (characterCount / process.env.TYPING_DELAY_CHARS_PER_SECOND) * 1000;
 
     const delay = Math.max(
-        env.typing.minMs,
-        Math.min(calculatedDelay, env.typing.maxMs)
+        process.env.TYPING_DELAY_MIN_MS,
+        Math.min(calculatedDelay, process.env.TYPING_DELAY_MAX_MS)
     );
 
-    const randomFactor = 0.9 + Math.random() * 0.2;
-
-    return Math.round(delay * randomFactor);
+    return Math.round(delay);
 }
 
 async function startTyping(chatId, sessionName) {
@@ -60,7 +45,7 @@ async function stopTyping(chatId, sessionName) {
  *
  * @param {string} chatId
  * @param {string} text
- * @param {string} sessionName - wajib diisi, hasil dari resolveSessionName().
+ * @param {string} sessionName
  */
 async function sendText(chatId, text, sessionName) {
     if (!chatId) {
@@ -72,10 +57,7 @@ async function sendText(chatId, text, sessionName) {
     }
 
     if (!sessionName) {
-        throw new Error(
-            'sessionName wajib diisi. Panggil resolveSessionName() ' +
-                'sebelum memanggil sendText().'
-        );
+        throw new Error('sessionName wajib diisi.');
     }
 
     const typingDelay = calculateTypingDelay(text);

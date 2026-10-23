@@ -1,29 +1,37 @@
+require('dotenv').config();
+
 const { db } = require('../config/database');
 const { formatDateTime, sanitizeText } = require('../utils/format');
-const { resolveSessionName } = require('./waha-session');
 const { sendText } = require('./whatsapp');
 
-// Format keluhan baru
-function formatNewKeluhan(keluhan) {
+const getGroupsByUserId = db.prepare(`
+    SELECT *
+    FROM whatsapp_groups
+    WHERE enabled = 1
+      AND user_id = ?
+    ORDER BY id
+`);
+
+function formatKeluhanBaru(keluhan) {
     return [
         '🚨 KELUHAN BARU',
         '',
         `*No Laporan:* ${sanitizeText(keluhan.no_laporan, 50)}`,
         `*Pelapor:* ${sanitizeText(keluhan.nama_pelapor, 100)}`,
+        `*Telepon:* ${sanitizeText(keluhan.telepon_pelapor, 50)}`,
         `*No Meter:* ${sanitizeText(keluhan.no_meter, 50)}`,
         `*ULP:* ${sanitizeText(keluhan.nama_ulp, 100)}`,
         '',
         '*Permasalahan:*',
         sanitizeText(keluhan.permasalahan, 500),
         '',
-        `*Status:* ${sanitizeText(keluhan.status, 100)}`,
+        `*Status:* ${sanitizeText(keluhan.status_akhir, 100)}`,
         `*Waktu Lapor:* ${formatDateTime(keluhan.waktu_lapor)}`,
         '',
         'Mohon segera ditindaklanjuti.'
     ].join('\n');
 }
 
-// Format reminder
 function formatReminder(keluhan) {
     return [
         '⚠️ REMINDER KELUHAN',
@@ -32,48 +40,90 @@ function formatReminder(keluhan) {
         '',
         `*No Laporan:* ${sanitizeText(keluhan.no_laporan, 50)}`,
         `*Pelapor:* ${sanitizeText(keluhan.nama_pelapor, 100)}`,
+        `*Telepon:* ${sanitizeText(keluhan.telepon_pelapor, 50)}`,
         `*ULP:* ${sanitizeText(keluhan.nama_ulp, 100)}`,
         '',
         '*Permasalahan:*',
         sanitizeText(keluhan.permasalahan, 500),
         '',
-        `*Status:* ${sanitizeText(keluhan.status, 100)}`,
+        `*Status:* ${sanitizeText(keluhan.status_akhir, 100)}`,
         `*Durasi:* ${sanitizeText(keluhan.durasi, 50)}`,
         '',
         'Mohon segera ditindaklanjuti.'
     ].join('\n');
 }
 
-function getGroups(column) {
-    // `column` hanya berasal dari kode di bawah, bukan input luar.
-    return db
-        .prepare(
-            `
-            SELECT *
-            FROM whatsapp_groups
-            WHERE enabled = 1
-              AND ${column} = 1
-            ORDER BY id
-        `
-        )
-        .all();
+function formatStatusChange(keluhan) {
+    return [
+        'ℹ️ STATUS KELUHAN BERUBAH',
+        '',
+        `*No Laporan:* ${sanitizeText(keluhan.no_laporan, 50)}`,
+        `*Pelapor:* ${sanitizeText(keluhan.nama_pelapor, 100)}`,
+        `*Telepon:* ${sanitizeText(keluhan.telepon_pelapor, 50)}`,
+        `*ULP:* ${sanitizeText(keluhan.nama_ulp, 100)}`,
+        '',
+        '*Permasalahan:*',
+        sanitizeText(keluhan.permasalahan, 500),
+        '',
+        `*Status Baru:* ${sanitizeText(keluhan.status_akhir, 100)}`,
+        `*Durasi:* ${sanitizeText(keluhan.durasi, 50)}`
+    ].join('\n');
 }
 
-// Mengirim ke semua grup. Mengembalikan jumlah grup yang berhasil.
-// Penanda "sudah dinotifikasi" disimpan oleh poller, bukan di sini.
-async function broadcast(column, text, label) {
-    const groups = getGroups(column);
+function formatGangguanBaru(gangguan) {
+    return [
+        '🚨 GANGGUAN BARU',
+        '',
+        `*No Laporan:* ${sanitizeText(gangguan.no_laporan, 50)}`,
+        `*Pelapor:* ${sanitizeText(gangguan.nama_pelapor, 100)}`,
+        `*Telepon:* ${sanitizeText(gangguan.telepon_pelapor, 50)}`,
+        `*Posko:* ${sanitizeText(gangguan.nama_posko, 100)}`,
+        '',
+        '*Permasalahan:*',
+        sanitizeText(gangguan.permasalahan, 500),
+        '',
+        `*Status:* ${sanitizeText(gangguan.status_akhir, 100)}`,
+        `*Waktu Lapor:* ${formatDateTime(gangguan.waktu_lapor)}`,
+        '',
+        'Mohon segera ditindaklanjuti.'
+    ].join('\n');
+}
+
+function formatGangguanStatusChange(gangguan) {
+    return [
+        'ℹ️ STATUS GANGGUAN BERUBAH',
+        '',
+        `*No Laporan:* ${sanitizeText(gangguan.no_laporan, 50)}`,
+        `*Pelapor:* ${sanitizeText(gangguan.nama_pelapor, 100)}`,
+        `*Telepon:* ${sanitizeText(gangguan.telepon_pelapor, 50)}`,
+        `*Posko:* ${sanitizeText(gangguan.nama_posko, 100)}`,
+        '',
+        '*Permasalahan:*',
+        sanitizeText(gangguan.permasalahan, 500),
+        '',
+        `*Status Baru:* ${sanitizeText(gangguan.status_akhir, 100)}`,
+        `*Durasi:* ${sanitizeText(gangguan.durasi, 50)}`
+    ].join('\n');
+}
+
+async function broadcast(userId, text, label) {
+    const groups = getGroupsByUserId.all(userId);
 
     if (!groups.length) {
         return 0;
     }
 
-    const sessionName = resolveSessionName();
+    const session = process.env.WAHA_SESSION;
+
+    if (!session) {
+        throw new Error('WAHA_SESSION belum dikonfigurasi.');
+    }
+
     let sent = 0;
 
     for (const group of groups) {
         try {
-            await sendText(group.chat_id, text, sessionName);
+            await sendText(group.chat_id, text, session);
 
             sent += 1;
 
@@ -91,17 +141,39 @@ async function broadcast(column, text, label) {
     return sent;
 }
 
-function notifyNewKeluhan(keluhan) {
-    return broadcast('notify_new', formatNewKeluhan(keluhan), 'Keluhan baru');
+function notifyKeluhanBaru(userId, keluhan) {
+    return broadcast(userId, formatKeluhanBaru(keluhan), 'Keluhan Baru');
 }
 
-function notifyReminder(keluhan) {
-    return broadcast('notify_reminder', formatReminder(keluhan), 'Reminder');
+function notifyReminder(userId, keluhan) {
+    return broadcast(userId, formatReminder(keluhan), 'Reminder');
+}
+
+function notifyStatusChange(userId, keluhan) {
+    return broadcast(userId, formatStatusChange(keluhan), 'Status Berubah');
+}
+
+function notifyGangguanBaru(userId, gangguan) {
+    return broadcast(userId, formatGangguanBaru(gangguan), 'Gangguan Baru');
+}
+
+function notifyGangguanStatusChange(userId, gangguan) {
+    return broadcast(
+        userId,
+        formatGangguanStatusChange(gangguan),
+        'Status Gangguan Berubah'
+    );
 }
 
 module.exports = {
-    notifyNewKeluhan,
+    notifyKeluhanBaru,
     notifyReminder,
-    formatNewKeluhan,
-    formatReminder
+    notifyStatusChange,
+    notifyGangguanBaru,
+    notifyGangguanStatusChange,
+    formatKeluhanBaru,
+    formatReminder,
+    formatStatusChange,
+    formatGangguanBaru,
+    formatGangguanStatusChange
 };

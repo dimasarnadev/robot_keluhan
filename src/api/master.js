@@ -1,7 +1,8 @@
+require('dotenv').config();
+
 const axios = require('axios');
 const express = require('express');
 
-const env = require('../config/env');
 const { requireAuth, respondUpstreamError } = require('../middleware/auth');
 const { ValidationError, requireInteger } = require('../utils/validate');
 
@@ -76,13 +77,13 @@ const QUERY_ULP = `
 
 async function requestMaster({ session, query, variables }) {
     const response = await axios.post(
-        env.graphqlMasterUrl,
+        process.env.APKT_MASTER_URL,
         { query, variables },
         {
             headers: {
                 Authorization: `Bearer ${session.authToken}`
             },
-            timeout: env.requestTimeout
+            timeout: process.env.REQUEST_TIMEOUT_MS
         }
     );
 
@@ -111,10 +112,6 @@ module.exports = ({ db, session }) => {
         return respondUpstreamError(res, error, { db, session, label });
     }
 
-    // ====================================================
-    // MASTER UP3
-    // ====================================================
-
     router.post('/up3', requireAuth(session), async (req, res) => {
         try {
             const idUid = requireInteger(req.body || {}, 'id_uid');
@@ -130,10 +127,6 @@ module.exports = ({ db, session }) => {
             return handleError(res, error, 'MASTER UP3');
         }
     });
-
-    // ====================================================
-    // MASTER ULP
-    // ====================================================
 
     router.post('/ulp', requireAuth(session), async (req, res) => {
         try {

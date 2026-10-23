@@ -1,12 +1,12 @@
 function requireAuth(session) {
     return (req, res, next) => {
-        if (session.authToken && session.statusToken === 'Aktif') {
+        if (session.authToken !== '') {
             return next();
         }
 
         return res.status(401).json({
             status: false,
-            message: 'Belum login / Token Expired.'
+            message: 'Belum login. Silakan login terlebih dahulu.'
         });
     };
 }
@@ -14,17 +14,13 @@ function requireAuth(session) {
 function expireSession(db, session) {
     db.prepare(
         `
-        UPDATE app_session
-        SET statusToken = 'Expired'
-        WHERE id = 1
+        UPDATE user_sessions
+        SET auth_token = ''
+        WHERE id = ?
     `
-    ).run();
-
-    session.statusToken = 'Expired';
+    ).run(session.sessionId);
 }
 
-// Penanganan error dari server APKT yang seragam.
-// Detail error internal tidak pernah dikirim ke client.
 function respondUpstreamError(res, error, { db, session, label }) {
     if (error.response?.status === 401) {
         expireSession(db, session);

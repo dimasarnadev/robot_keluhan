@@ -8,17 +8,17 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const swaggerUi = require('swagger-ui-express');
 
-const env = require('./config/env');
 const { db } = require('./config/database');
-const { session, loadSessionFromDB } = require('./config/session');
+const { loadAndReturnSession } = require('./config/session');
 
 const authRoutes = require('./api/auth');
 const keluhanRoutes = require('./api/keluhan');
 const masterRoutes = require('./api/master');
 const whatsappRoutes = require('./api/whatsapp');
 
-const { startKeluhanPoller } = require('./jobs/keluhan-poller');
+const { startScheduler, stopScheduler } = require('./jobs/scheduler');
 const swaggerSpec = require('./swagger/swagger');
+const { start } = require('repl');
 
 const app = express();
 
@@ -38,7 +38,6 @@ app.use(
             useDefaults: true,
             directives: {
                 'img-src': ["'self'", 'data:'],
-                // Server dijalankan lewat HTTP di jaringan internal.
                 'upgrade-insecure-requests': null
             }
         }
@@ -48,13 +47,13 @@ app.use(
 // Tanpa CORS_ORIGIN, hanya same-origin yang diizinkan.
 app.use(
     cors({
-        origin: env.corsOrigins.length ? env.corsOrigins : false
+        origin: false
     })
 );
 
 app.use(express.json({ limit: '100kb' }));
 
-loadSessionFromDB();
+const session = loadAndReturnSession(process.env.SESSION_ID);
 
 // Batasi percobaan login (mencegah brute force).
 app.use(
@@ -103,12 +102,22 @@ app.use((error, req, res, next) => {
     });
 });
 
-app.listen(env.port, () => {
-    console.log(`🚀 REST API running on port ${env.port}`);
-    console.log(`📚 Swagger: http://localhost:${env.port}/api-docs`);
+app.listen(process.env.PORT || 3000, () => {
+    console.log(`🚀 REST API running on port ${process.env.PORT || 3000}`);
     console.log(
-        `📱 WAHA webhook: http://localhost:${env.port}/api/v1/whatsapp/webhook`
+        `📚 Swagger: http://localhost:${process.env.PORT || 3000}/api-docs`
+    );
+    console.log(
+        `📱 WAHA webhook: http://localhost:${process.env.PORT || 3000}/api/v1/whatsapp/webhook`
     );
 
-    startKeluhanPoller();
+    startScheduler();
+});
+
+process.on('SIGTERM', () => {
+    server.close(() => {
+        stopScheduler();
+        db.close();
+        process.exit(0);
+    });
 });

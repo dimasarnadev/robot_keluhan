@@ -1,8 +1,9 @@
+require('dotenv').config();
+
 const axios = require('axios');
 const express = require('express');
 
-const env = require('../config/env');
-const { toPublicUser } = require('../config/session');
+const { parseSession } = require('../config/session');
 
 const MAX_FIELD_LENGTH = 200;
 const MAX_CAPTCHA_IMAGE_LENGTH = 200000;
@@ -29,9 +30,9 @@ module.exports = ({ db, session }) => {
     router.get('/captcha', async (req, res) => {
         try {
             const response = await axios.get(
-                `${env.authBaseUrl}/auth/captcha`,
+                `${process.env.APKT_AUTH_URL}/auth/captcha`,
                 {
-                    timeout: 10000
+                    timeout: 15000
                 }
             );
 
@@ -59,14 +60,12 @@ module.exports = ({ db, session }) => {
     });
 
     router.get('/status', (req, res) => {
-        const loggedIn =
-            Boolean(session.authToken) && session.statusToken === 'Aktif';
+        const loggedIn = Boolean(session.authToken);
 
         if (!loggedIn) {
             return res.status(401).json({
                 status: false,
                 loggedIn: false,
-                statusToken: session.statusToken || 'Belum Login',
                 user: null
             });
         }
@@ -74,8 +73,7 @@ module.exports = ({ db, session }) => {
         return res.json({
             status: true,
             loggedIn: true,
-            statusToken: session.statusToken,
-            user: toPublicUser(session.user)
+            user: parseSession(session.user)
         });
     });
 
@@ -98,49 +96,59 @@ module.exports = ({ db, session }) => {
             };
 
             const response = await axios.post(
-                `${env.authBaseUrl}/auth`,
+                `${process.env.APKT_AUTH_URL}/auth`,
                 payload,
                 {
-                    timeout: 10000
+                    timeout: 15000
                 }
             );
 
             if (response.data?.status && response.data.user?.authToken) {
                 const { authToken, ...profile } = response.data.user;
-                const publicUser = toPublicUser(profile);
+                const publicUser = parseSession(profile);
 
                 db.prepare(
                     `
-                    INSERT INTO app_session (
-                        id,
-                        authToken,
-                        statusToken,
-                        user_json,
-                        updated_at
+                    INSERT INTO user_sessions (
+                        session_id,
+                        auth_token,
+                        user_id,
+                        username,
+                        email,
+                        session_data,
+                        is_active,
+                        created_at
                     )
                     VALUES (
                         1,
                         ?,
-                        'Aktif',
                         ?,
+                        ?,
+                        ?,
+                        ?,
+                        1,
                         ?
                     )
 
-                    ON CONFLICT(id)
+                    ON CONFLICT(session_id)
                     DO UPDATE SET
-                        authToken = excluded.authToken,
-                        statusToken = excluded.statusToken,
-                        user_json = excluded.user_json,
-                        updated_at = excluded.updated_at
+                        auth_token = excluded.auth_token,
+                        user_id = excluded.user_id,
+                        username = excluded.username,
+                        email = excluded.email,
+                        session_data = excluded.session_data,
+                        created_at = excluded.created_at
                 `
                 ).run(
                     authToken,
+                    publicUser.userId,
+                    publicUser.username,
+                    publicUser.email,
                     JSON.stringify(publicUser),
                     new Date().toISOString()
                 );
 
                 session.authToken = authToken;
-                session.statusToken = 'Aktif';
                 session.user = publicUser;
 
                 return res.json({
