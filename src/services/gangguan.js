@@ -3,6 +3,7 @@ const axios = require('axios');
 
 const STATUS_GANGGUAN = [
     'Lapor',
+    'Lapor (Cancel WO)',
     'Menunggu Konfirmasi',
     'Penugasan Regu',
     'Dalam Perjalanan',
