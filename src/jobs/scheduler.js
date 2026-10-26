@@ -74,7 +74,7 @@ const keluhanPerluReminder = db.prepare(`
     FROM keluhan
     WHERE status_akhir NOT IN (${CLOSE_STATUS_KELUHAN.map((s) => `'${s}'`).join(', ')})
       AND updated_at <= datetime('now', '-15 minutes')
-      AND updated_at > datetime('now', '-16 minutes')
+      AND updated_at > datetime('now', '-17 minutes')
 `);
 
 const workers = {

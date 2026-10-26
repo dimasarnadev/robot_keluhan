@@ -253,6 +253,49 @@ migrate(
 `
 );
 
+migrate(
+    '007_gangguan_add_status_akhir_lapor_periksa',
+    `
+  -- 1. Create the new table with the updated CHECK constraint
+    CREATE TABLE gangguan_new (
+        id INTEGER PRIMARY KEY,
+        no_laporan TEXT NOT NULL,
+        status_akhir TEXT NOT NULL
+        CHECK (status_akhir IN (
+            'Lapor',
+            'Lapor (Kwh Periksa)',
+            'Lapor (Cancel WO)',
+            'Menunggu Konfirmasi',
+            'Penugasan Regu',
+            'Dalam Perjalanan',
+            'Dalam Pengerjaan',
+            'Nyala',
+            'Nyala Sementara',
+            'Selesai',
+            'Selesai(PEMADAMAN MELUAS)',
+            'Selesai(GANGGUAN SISTEM)',
+            'Dibatalkan'
+        )),
+        created_at TEXT DEFAULT (datetime('now')) NOT NULL,
+        updated_at TEXT DEFAULT (datetime('now')) NOT NULL
+    ) STRICT;
+
+    -- 2. Copy all data from the existing table into the new table
+    INSERT INTO gangguan_new (id, no_laporan, status_akhir, created_at, updated_at)
+    SELECT id, no_laporan, status_akhir, created_at, updated_at 
+    FROM gangguan;
+
+    -- 3. Drop the old table
+    DROP TABLE gangguan;
+
+    -- 4. Rename the new table to the original table name
+    ALTER TABLE gangguan_new RENAME TO gangguan;
+
+    -- 5. Recreate the index on the new table
+    CREATE INDEX idx_gangguan_no_laporan ON gangguan(no_laporan);
+`
+);
+
 module.exports = {
     db
 };

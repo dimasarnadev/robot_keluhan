@@ -31,6 +31,7 @@ function normalizeKeluhan(row) {
         waktu_nyala: row.waktu_nyala,
         durasi: row.durasi,
         status_akhir: row.status_akhir,
+        media: row.media,
 
         id_pelanggan: row.pelanggan_no_meter?.id_pelanggan,
         no_meter: row.pelanggan_no_meter?.no_meter,
@@ -153,16 +154,17 @@ const QUERY_KELUHAN = `
     .replace(/\s+/g, ' ')
     .trim();
 
-async function getMonitoringKeluhanAll(params = {}) {
-    const request = {
-        ...resolveSessionDefaults(params.session, params),
-        ...resolveDefaultDateRange({
-            tanggalMulai: params.tanggalMulai,
-            tanggalSelesai: params.tanggalSelesai,
-            rangeDays: Number(process.env.POLL_RANGE_DAYS || 1)
-        })
-    };
-
+async function getMonitoringKeluhanAll({
+    token,
+    idUid,
+    userId,
+    idUlp,
+    tanggalMulai,
+    tanggalSelesai,
+    limit = 500,
+    skip = 0,
+    filters = []
+}) {
     if (!process.env.APKT_TRANSACTION_URL) {
         throw new Error('APKT_TRANSACTION_URL belum dikonfigurasi.');
     }
@@ -173,23 +175,23 @@ async function getMonitoringKeluhanAll(params = {}) {
             query: QUERY_KELUHAN,
             variables: {
                 search: {
-                    skip: request.skip ?? 0,
-                    take: request.limit ?? 20,
+                    skip,
+                    take: limit,
                     sort: null,
                     requireTotalCount: true,
-                    dateFrom: request.tanggalMulai,
-                    dateTo: request.tanggalSelesai,
+                    dateFrom: tanggalMulai,
+                    dateTo: tanggalSelesai,
                     isCreateDate: false,
-                    filter: request.filters ?? []
+                    filter: filters
                 },
-                userId: request.userId,
-                idUid: request.idUid,
-                idUlp: request.idUlp
+                idUid,
+                idUlp,
+                userId
             }
         },
         {
             headers: {
-                Authorization: `Bearer ${request.token}`,
+                Authorization: `Bearer ${token}`,
                 'Content-Type': 'application/json'
             },
             timeout: process.env.APKT_TIMEOUT_MS
@@ -223,17 +225,8 @@ async function getMonitoringKeluhanAll(params = {}) {
     };
 }
 
-async function postKeluhan(params = {}) {
-    const request = {
-        ...resolveSessionDefaults(params.session, params),
-        ...resolveDefaultDateRange({
-            tanggalMulai: params.tanggalMulai,
-            tanggalSelesai: params.tanggalSelesai,
-            rangeDays: Number(process.env.POLL_RANGE_DAYS || 1)
-        })
-    };
-
-    const result = await getMonitoringKeluhanAll(request);
+async function postKeluhan(params) {
+    const result = await getMonitoringKeluhanAll(params);
 
     return {
         ...result,

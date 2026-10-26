@@ -3,6 +3,7 @@ const axios = require('axios');
 
 const STATUS_GANGGUAN = [
     'Lapor',
+    'Lapor (Kwh Periksa)',
     'Lapor (Cancel WO)',
     'Menunggu Konfirmasi',
     'Penugasan Regu',
@@ -11,13 +12,18 @@ const STATUS_GANGGUAN = [
     'Nyala',
     'Nyala Sementara',
     'Selesai',
+    'Selesai(PEMADAMAN MELUAS)',
+    'Selesai(GANGGUAN SISTEM)',
     'Dibatalkan'
 ];
 
 const CLOSE_STATUS_GANGGUAN = [
     'Dibatalkan',
+    'Nyala',
+    'Nyala Sementara',
     'Selesai',
-    'Selesai(PEMADAMAN MELUAS)'
+    'Selesai(PEMADAMAN MELUAS)',
+    'Selesai(GANGGUAN SISTEM)'
 ];
 
 const MAX_PAGES = 10;
@@ -235,6 +241,7 @@ function normalizeGangguan(row) {
         waktu_nyala: row.waktu_nyala,
         durasi: row.durasi,
         status_akhir: row.status_akhir,
+        media: row.media,
 
         id_pelanggan: row.pelanggan_no_meter?.id_pelanggan,
         no_meter: row.pelanggan_no_meter?.no_meter,
@@ -258,7 +265,7 @@ async function getMonitoringGangguanAll({
     idPosko,
     tanggalMulai,
     tanggalSelesai,
-    limit = 50,
+    limit = 500,
     skip = 0,
     filters = []
 }) {

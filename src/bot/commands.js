@@ -142,12 +142,10 @@ function formatKeluhanList({ rows, totalOpen, truncated }) {
     ];
 
     rows.forEach((row, index) => {
-        lines.push(`*${index + 1}. ${sanitizeText(row.no_laporan, 50)}*`);
-        lines.push(`👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`);
-        lines.push(`💬 *Permasalahan:* ${sanitizeText(row.permasalahan, 200)}`);
-        lines.push(`🔄 *Status:* ${sanitizeText(row.status_akhir, 100)}`);
-        lines.push(`🕐 *Waktu Lapor:* ${formatDateTime(row.waktu_lapor)}`);
-        lines.push(`⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`);
+        lines.push(`${index + 1}. ${row.no_laporan}`);
+        lines.push(
+            `${sanitizeText(row.media, 50)} ${sanitizeText(row.nama_pelapor, 100)} ${sanitizeText(row.durasi, 50)} ${sanitizeText(row.status_akhir, 50)} ${sanitizeText(row.alamat_pelapor, 500)} ${sanitizeText(row.nama_ulp, 50)} ${sanitizeText(row.telepon_pelapor, 50)} ${row.permasalahan}`
+        );
         lines.push('');
     });
 
@@ -184,7 +182,7 @@ async function getDetailKeluhan(noLaporan) {
     return result.data.find((row) => row.no_laporan === noLaporan) || null;
 }
 
-function formatDetail(row) {
+function formatDetailKeluhan(row) {
     if (!row) {
         return [
             '❌ *KELUHAN TIDAK DITEMUKAN*',
@@ -194,9 +192,7 @@ function formatDetail(row) {
     }
 
     const lines = [
-        '📋 *DETAIL KELUHAN*',
-        '',
-        `*No Laporan:* ${sanitizeText(row.no_laporan, 50)}`,
+        `📋 *${sanitizeText(row.no_laporan, 50)}*`,
         '',
         `👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`,
         `📞 *Telepon:* ${sanitizeText(row.telepon_pelapor, 50)}`,
@@ -207,14 +203,14 @@ function formatDetail(row) {
         `📍 *ULP:* ${sanitizeText(row.nama_ulp, 100)}`,
         '',
         '📝 *Permasalahan:*',
-        sanitizeText(row.permasalahan, 500),
+        row.permasalahan,
         '',
         '📍 *Alamat:*',
-        sanitizeText(row.alamat_pelanggan, 300),
+        sanitizeText(row.alamat_pelanggan, 500),
         '',
         '🕐 *Waktu Lapor:*',
         formatDateTime(row.waktu_lapor),
-        `🔄 *Status:* ${sanitizeText(row.status_akhir, 100)}`,
+        `🔄 *Status:* ${sanitizeText(row.status_akhir, 50)}`,
         `⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`
     ];
 
@@ -277,15 +273,10 @@ function formatGangguanList({ rows, totalOpen, truncated }) {
     ];
 
     rows.forEach((row, index) => {
-        lines.push(`*${index + 1}. ${sanitizeText(row.no_laporan, 50)}*`);
-        lines.push(`👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`);
+        lines.push(`${index + 1}. ${row.no_laporan}`);
         lines.push(
-            `💬 *Permasalahan:* ${sanitizeText(row.permasalahan ?? row.deskripsi, 200)}`
+            `${sanitizeText(row.media, 50)} ${sanitizeText(row.nama_pelapor, 100)} ${sanitizeText(row.durasi, 50)} ${sanitizeText(row.status_akhir, 50)} ${sanitizeText(row.alamat_pelapor, 500)} ${sanitizeText(row.nama_posko, 50)} ${sanitizeText(row.telepon_pelapor, 50)} ${row.permasalahan}`
         );
-        lines.push(`🔄 *Status:* ${sanitizeText(row.status_akhir, 100)}`);
-        lines.push(`🕐 *Waktu Lapor:* ${formatDateTime(row.waktu_lapor)}`);
-        lines.push(`📍 *Posko:* ${sanitizeText(row.nama_posko, 100)}`);
-        lines.push(`⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`);
         lines.push('');
     });
 
@@ -334,25 +325,23 @@ function formatDetailGangguan(row) {
     }
 
     const lines = [
-        '📋 *DETAIL GANGGUAN*',
-        '',
-        `*No Laporan:* ${sanitizeText(row.no_laporan, 50)}`,
+        `📋 *${sanitizeText(row.no_laporan, 50)}*`,
         '',
         `👤 *Pelapor:* ${sanitizeText(row.nama_pelapor, 100)}`,
         `📞 *Telepon:* ${sanitizeText(row.telepon_pelapor, 50)}`,
-        `📍 *Posko:* ${sanitizeText(row.nama_posko, 100)}`,
         `🆔 *ID Pelanggan:* ${sanitizeText(row.id_pelanggan, 50)}`,
         `⚡ *No Meter:* ${sanitizeText(row.no_meter, 50)}`,
+        `📍 *Posko:* ${sanitizeText(row.nama_posko, 100)}`,
         '',
         '📝 *Permasalahan:*',
-        sanitizeText(row.permasalahan, 500),
+        row.permasalahan,
         '',
         '📍 *Alamat:*',
-        sanitizeText(row.alamat_pelanggan, 300),
+        sanitizeText(row.alamat_pelanggan, 500),
         '',
         '🕐 *Waktu Lapor:*',
         formatDateTime(row.waktu_lapor),
-        `🔄 *Status:* ${sanitizeText(row.status_akhir, 100)}`,
+        `🔄 *Status:* ${sanitizeText(row.status_akhir, 50)}`,
         `⌛ *Durasi:* ${sanitizeText(row.durasi, 50)}`
     ];
 
@@ -449,7 +438,7 @@ async function handleCommand({ chatId, text, incomingSession = null }) {
                 message = formatDetailGangguan(row);
             } else {
                 row = await getDetailKeluhan(noLaporan);
-                message = formatDetail(row);
+                message = formatDetailKeluhan(row);
             }
 
             await sendText(chatId, message, sessionName);
@@ -480,7 +469,7 @@ module.exports = {
     getOpenGangguan,
     getDetailGangguan,
     formatKeluhanList,
-    formatDetail,
+    formatDetailKeluhan,
     formatGangguanList,
     formatDetailGangguan,
     helpMessage,

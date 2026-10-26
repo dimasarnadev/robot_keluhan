@@ -14,37 +14,40 @@ const getGroupsByUserId = db.prepare(`
 
 function formatKeluhanBaru(keluhan) {
     return [
-        '🚨 KELUHAN BARU',
+        '🚨 *KELUHAN BARU*',
         '',
         `*No Laporan:* ${sanitizeText(keluhan.no_laporan, 50)}`,
         `*Pelapor:* ${sanitizeText(keluhan.nama_pelapor, 100)}`,
         `*Telepon:* ${sanitizeText(keluhan.telepon_pelapor, 50)}`,
+        `*Alamat:* ${sanitizeText(keluhan.alamat_pelapor, 500)}`,
+        `*Idpel:* ${sanitizeText(keluhan.id_pelanggan, 50)}`,
         `*No Meter:* ${sanitizeText(keluhan.no_meter, 50)}`,
         `*ULP:* ${sanitizeText(keluhan.nama_ulp, 100)}`,
         '',
         '*Permasalahan:*',
-        sanitizeText(keluhan.permasalahan, 500),
+        keluhan.permasalahan,
         '',
         `*Status:* ${sanitizeText(keluhan.status_akhir, 100)}`,
-        `*Waktu Lapor:* ${formatDateTime(keluhan.waktu_lapor)}`,
-        '',
-        'Mohon segera ditindaklanjuti.'
+        `*Waktu Lapor:* ${formatDateTime(keluhan.waktu_lapor)}`
     ].join('\n');
 }
 
 function formatReminder(keluhan) {
     return [
-        '⚠️ REMINDER KELUHAN',
+        '⚠️ *REMINDER KELUHAN*',
         '',
         'Status belum berubah dan belum diproses.',
         '',
         `*No Laporan:* ${sanitizeText(keluhan.no_laporan, 50)}`,
         `*Pelapor:* ${sanitizeText(keluhan.nama_pelapor, 100)}`,
         `*Telepon:* ${sanitizeText(keluhan.telepon_pelapor, 50)}`,
+        `*Alamat:* ${sanitizeText(keluhan.alamat_pelapor, 500)}`,
+        `*Idpel:* ${sanitizeText(keluhan.id_pelanggan, 50)}`,
+        `*No Meter:* ${sanitizeText(keluhan.no_meter, 50)}`,
         `*ULP:* ${sanitizeText(keluhan.nama_ulp, 100)}`,
         '',
         '*Permasalahan:*',
-        sanitizeText(keluhan.permasalahan, 500),
+        keluhan.permasalahan,
         '',
         `*Status:* ${sanitizeText(keluhan.status_akhir, 100)}`,
         `*Durasi:* ${sanitizeText(keluhan.durasi, 50)}`,
@@ -55,15 +58,18 @@ function formatReminder(keluhan) {
 
 function formatStatusChange(keluhan) {
     return [
-        'ℹ️ STATUS KELUHAN BERUBAH',
+        'ℹ️ *STATUS KELUHAN BERUBAH*',
         '',
         `*No Laporan:* ${sanitizeText(keluhan.no_laporan, 50)}`,
         `*Pelapor:* ${sanitizeText(keluhan.nama_pelapor, 100)}`,
         `*Telepon:* ${sanitizeText(keluhan.telepon_pelapor, 50)}`,
+        `*Alamat:* ${sanitizeText(keluhan.alamat_pelapor, 500)}`,
+        `*Idpel:* ${sanitizeText(keluhan.id_pelanggan, 50)}`,
+        `*No Meter:* ${sanitizeText(keluhan.no_meter, 50)}`,
         `*ULP:* ${sanitizeText(keluhan.nama_ulp, 100)}`,
         '',
         '*Permasalahan:*',
-        sanitizeText(keluhan.permasalahan, 500),
+        keluhan.permasalahan,
         '',
         `*Status Baru:* ${sanitizeText(keluhan.status_akhir, 100)}`,
         `*Durasi:* ${sanitizeText(keluhan.durasi, 50)}`
@@ -72,34 +78,34 @@ function formatStatusChange(keluhan) {
 
 function formatGangguanBaru(gangguan) {
     return [
-        '🚨 GANGGUAN BARU',
+        '🚨 *GANGGUAN BARU*',
         '',
         `*No Laporan:* ${sanitizeText(gangguan.no_laporan, 50)}`,
         `*Pelapor:* ${sanitizeText(gangguan.nama_pelapor, 100)}`,
         `*Telepon:* ${sanitizeText(gangguan.telepon_pelapor, 50)}`,
+        `*Alamat:* ${sanitizeText(gangguan.alamat_pelapor, 500)}`,
         `*Posko:* ${sanitizeText(gangguan.nama_posko, 100)}`,
         '',
         '*Permasalahan:*',
-        sanitizeText(gangguan.permasalahan, 500),
+        gangguan.permasalahan,
         '',
         `*Status:* ${sanitizeText(gangguan.status_akhir, 100)}`,
-        `*Waktu Lapor:* ${formatDateTime(gangguan.waktu_lapor)}`,
-        '',
-        'Mohon segera ditindaklanjuti.'
+        `*Waktu Lapor:* ${formatDateTime(gangguan.waktu_lapor)}`
     ].join('\n');
 }
 
 function formatGangguanStatusChange(gangguan) {
     return [
-        'ℹ️ STATUS GANGGUAN BERUBAH',
+        'ℹ️ *STATUS GANGGUAN BERUBAH*',
         '',
         `*No Laporan:* ${sanitizeText(gangguan.no_laporan, 50)}`,
         `*Pelapor:* ${sanitizeText(gangguan.nama_pelapor, 100)}`,
         `*Telepon:* ${sanitizeText(gangguan.telepon_pelapor, 50)}`,
+        `*Alamat:* ${sanitizeText(gangguan.alamat_pelapor, 500)}`,
         `*Posko:* ${sanitizeText(gangguan.nama_posko, 100)}`,
         '',
         '*Permasalahan:*',
-        sanitizeText(gangguan.permasalahan, 500),
+        gangguan.permasalahan,
         '',
         `*Status Baru:* ${sanitizeText(gangguan.status_akhir, 100)}`,
         `*Durasi:* ${sanitizeText(gangguan.durasi, 50)}`
